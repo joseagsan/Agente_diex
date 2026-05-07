@@ -1159,19 +1159,89 @@ def page_gerar_req(reqs, ncs):
                 if k != "requisition_id":
                     st.text(f"{k}: {v}")
 
+    # ── Pesquisa no portal
+    st.divider()
+    st.subheader("🔍 Pesquisar Item no Portal Compras.gov.br")
+
+    from pesquisa_compras import playwright_disponivel
+
+    if not playwright_disponivel():
+        st.warning("⚠️ Playwright não instalado. Execute no terminal:\n\n"
+                   "```\npip install playwright\nplaywright install chromium\n```\n\n"
+                   "Este recurso só funciona localmente.")
+    else:
+        p1, p2, p3 = st.columns([1, 3, 1])
+        p_ug   = p1.text_input("UG/UASG",          value=UG_PADRAO,  key="pesq_ug")
+        p_desc = p2.text_input("Descrição ou nº pregão/ARP", placeholder="ex: caneta, 90005/2026", key="pesq_desc")
+        p_max  = p3.number_input("Máx. resultados", min_value=1, max_value=20, value=5, key="pesq_max")
+
+        if st.button("🔍 Pesquisar no Portal", key="btn_pesquisar"):
+            if not p_desc:
+                st.warning("Digite uma descrição ou número de pregão.")
+            else:
+                with st.spinner("🌐 Buscando no portal contratos.sistema.gov.br..."):
+                    try:
+                        from pesquisa_compras import buscar_itens_arp
+                        resultados = buscar_itens_arp(p_ug, p_desc, int(p_max))
+                        st.session_state["pesq_resultados"] = resultados
+                        if not resultados:
+                            st.info("Nenhum item encontrado. Verifique o termo de busca ou faça login no agente-licitacoes primeiro.")
+                    except Exception as e:
+                        st.error(f"Erro na pesquisa: {e}")
+                        st.info("Verifique se está logado em contratos.sistema.gov.br via agente-licitacoes (session.json).")
+
+        # Exibe resultados
+        resultados_pesq = st.session_state.get("pesq_resultados", [])
+        if resultados_pesq:
+            st.success(f"✅ {len(resultados_pesq)} item(ns) encontrado(s).")
+            for i, res in enumerate(resultados_pesq):
+                with st.expander(
+                    f"**{i+1}.** {res['descricao'][:70]} | {res['valor_unit']} | {res['fornecedor'][:40]}",
+                    expanded=(i == 0)
+                ):
+                    c_r1, c_r2, c_r3 = st.columns(3)
+                    c_r1.markdown(f"**ATA:** {res['numero_ata']}")
+                    c_r1.markdown(f"**Item:** {res['numero_item']}")
+                    c_r2.markdown(f"**Fornecedor:** {res['fornecedor']}")
+                    c_r2.markdown(f"**CNPJ:** {res['cnpj']}")
+                    c_r3.markdown(f"**Valor Unit.:** {res['valor_unit']}")
+                    c_r3.markdown(f"**Vigência:** {res['vigencia_inicio']} a {res['vigencia_fim']}")
+
+                    if st.button(f"✅ Usar este item", key=f"usar_{i}"):
+                        st.session_state["_item_prefill"] = res
+                        # Pré-preenche campos do formulário
+                        if res.get("fornecedor") and not st.session_state.get("campos_req", {}).get("FORNECEDOR_NOME"):
+                            st.session_state.setdefault("campos_req", {})["FORNECEDOR_NOME"] = res["fornecedor"]
+                            st.session_state["campos_req"]["FORNECEDOR_CNPJ"] = res["cnpj"]
+                        if res.get("vigencia_fim"):
+                            st.session_state.setdefault("campos_req", {})["VIGENCIA_DA_ATA"] = res["vigencia_fim"]
+                        st.info("Dados pré-carregados. Preencha Item/Sub-item e confirme abaixo ↓")
+
     # ── 2. Itens
     st.divider()
     st.subheader("2. Itens da Requisição")
+
+    # Pré-preenchimento do item se veio da pesquisa
+    prefill = st.session_state.pop("_item_prefill", None)
+    if prefill:
+        st.info(f"🔄 Dados carregados da pesquisa: **{prefill['descricao'][:60]}** · {prefill['valor_unit']}")
+        st.session_state["_desc_prefill"]  = prefill.get("descricao", "")
+        st.session_state["_und_prefill"]   = prefill.get("und", "UN")
+        st.session_state["_vunit_prefill"] = prefill.get("valor_unit_num", 0.0)
 
     with st.form("f_add_item", clear_on_submit=True):
         ci1, ci2, ci3 = st.columns([1, 1, 5])
         item  = ci1.text_input("Item *",    placeholder="ex: 42",  help="Nº do item no pregão")
         si    = ci2.text_input("Sub-item",  placeholder="ex: 1",   help="Nº do sub-item (se houver)")
-        desc  = ci3.text_input("Descrição do Item *")
+        desc  = ci3.text_input("Descrição do Item *",
+                               value=st.session_state.pop("_desc_prefill", ""))
         ci4, ci5, ci6 = st.columns([1, 1, 2])
-        und   = ci4.text_input("Unid.", value="UN")
+        und   = ci4.text_input("Unid.", value=st.session_state.pop("_und_prefill", "UN"))
         qtd   = ci5.number_input("Qtd", min_value=0.001, value=1.0, step=1.0, format="%.3f")
-        vunit = ci6.number_input("Valor Unit. (R$)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
+        vunit = ci6.number_input("Valor Unit. (R$)",
+                                 min_value=0.0,
+                                 value=float(st.session_state.pop("_vunit_prefill", 0.0)),
+                                 step=0.01, format="%.2f")
         add   = st.form_submit_button("➕ Adicionar Item", use_container_width=True)
 
     if add:
