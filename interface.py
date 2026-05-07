@@ -174,15 +174,9 @@ def _load():
     return ler_ncs(), ler_reqs(), ler_fornecedores()
 
 
-@st.cache_data(ttl=120, show_spinner=False)
-def _kpis_cached(ncs_tuple, reqs_tuple):
-    return kpis(list(ncs_tuple), list(reqs_tuple))
-
-
 def carregar(forcar: bool = False):
     if forcar:
         _load.clear()
-        _kpis_cached.clear()
     try:
         return _load()
     except Exception as e:
@@ -221,7 +215,7 @@ def _sidebar(ncs, reqs) -> str:
         st.divider()
 
         if ncs or reqs:
-            ind = _kpis_cached(tuple(str(n) for n in ncs), tuple(str(r) for r in reqs))
+            ind = kpis(ncs, reqs)
             st.markdown(f"""
             <div style="padding:4px 6px 8px;font-size:.78rem;">
                 <div style="color:{t['nav_color']};font-size:.63rem;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Resumo</div>
