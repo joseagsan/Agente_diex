@@ -1,0 +1,20 @@
+# Segredos e credenciais — NUNCA subir para o GitHub
+.env
+*.json
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Outputs e logs
+output/
+*.log
+*.png
+
+# IDEs
+.vscode/
+.idea/
