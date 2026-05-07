@@ -1013,39 +1013,80 @@ def page_gerar_req(reqs, ncs):
             v = nc_d.get(nc_campo, "")
         return v or default
 
-    # ── Seletores de frases padrão (fora do form para reatividade)
-    _FRASES_INTRO = [
-        "— escrever manualmente —",
-        "Solicito a V.Sa. autorização para realizar as aquisições abaixo especificadas, em conformidade com a legislação vigente e recursos disponíveis.",
-        "Encaminho à consideração de V.Sa. a presente requisição de material, com vistas ao atendimento das necessidades desta OM.",
-        "Solicito providências para a aquisição dos materiais discriminados, necessários ao cumprimento da missão desta organização.",
-        "Solicito a V.Sa. a emissão de Nota de Empenho para aquisição dos materiais/serviços abaixo relacionados, em conformidade com os recursos creditados.",
-    ]
-    _FRASES_JUST = [
-        "— escrever manualmente —",
-        "A aquisição dos itens constantes nesta requisição justifica-se pela necessidade de manutenção das atividades operacionais desta OM.",
-        "Os materiais solicitados são essenciais para o cumprimento da missão atribuída a esta organização militar, conforme planejamento operacional vigente.",
-        "A presente requisição atende às necessidades administrativas e operacionais desta OM, visando garantir a continuidade das atividades rotineiras.",
-        "A aquisição é necessária para a execução da operação/missão em curso, não havendo material disponível em estoque para suprir a demanda.",
-        "O material/serviço solicitado é indispensável para manutenção das condições operacionais mínimas desta OM, não podendo ser postergada sua aquisição.",
-    ]
+    # ── Saldo da NC selecionada
+    nc_saldo = parse(nc_d.get("SALDO NC", 0)) if nc_d else 0.0
+    total_itens = sum(i["_total"] for i in st.session_state.req_itens)
+    if nc_d and nc_saldo > 0:
+        k1, k2, k3 = st.columns(3)
+        k1.metric("💰 Saldo NC", fmt(nc_saldo))
+        k2.metric("📋 Total desta REQ", fmt(total_itens))
+        saldo_apos = nc_saldo - total_itens
+        k3.metric("🔖 Saldo após REQ", fmt(saldo_apos),
+                  delta="OK" if saldo_apos >= 0 else "⚠️ Excede saldo",
+                  delta_color="normal" if saldo_apos >= 0 else "inverse")
 
-    if "intro_txt" not in st.session_state:  st.session_state.intro_txt = ""
-    if "just_txt"  not in st.session_state:  st.session_state.just_txt  = ""
+    # ── Frases cadastradas (fora do form para reatividade)
+    @st.cache_data(ttl=60, show_spinner=False)
+    def _frases(tipo):
+        from sheets_nc import ler_frases
+        return ["— escrever manualmente —"] + ler_frases(tipo)
 
     col_i, col_j = st.columns(2)
     with col_i:
-        sel_intro = st.selectbox("📝 Frase padrão — Introdução", _FRASES_INTRO, key="sel_intro_frase")
+        st.caption("📝 Introdução")
+        frases_intro = _frases("INTRO")
+        sel_intro = st.selectbox("Frase padrão", frases_intro, key="sel_intro_frase",
+                                  label_visibility="collapsed")
         if sel_intro != "— escrever manualmente —":
             st.session_state["_intro_txt"] = sel_intro
         elif "_intro_txt" not in st.session_state:
             st.session_state["_intro_txt"] = ""
+
+        with st.expander("➕ Cadastrar nova frase de Introdução"):
+            nova_intro = st.text_area("Texto", key="nova_intro_txt", height=80)
+            if st.button("💾 Salvar", key="btn_salvar_intro"):
+                if nova_intro.strip():
+                    from sheets_nc import adicionar_frase
+                    adicionar_frase("INTRO", nova_intro.strip())
+                    st.cache_data.clear()
+                    st.success("Frase salva!")
+                    st.rerun()
+
+        if sel_intro != "— escrever manualmente —":
+            with st.expander("🗑️ Excluir esta frase"):
+                if st.button("Confirmar exclusão", key="btn_del_intro"):
+                    from sheets_nc import excluir_frase
+                    excluir_frase("INTRO", sel_intro)
+                    st.cache_data.clear()
+                    st.rerun()
+
     with col_j:
-        sel_just = st.selectbox("📝 Frase padrão — Justificativa", _FRASES_JUST, key="sel_just_frase")
+        st.caption("📝 Justificativa")
+        frases_just = _frases("JUST")
+        sel_just = st.selectbox("Frase padrão", frases_just, key="sel_just_frase",
+                                 label_visibility="collapsed")
         if sel_just != "— escrever manualmente —":
             st.session_state["_just_txt"] = sel_just
         elif "_just_txt" not in st.session_state:
             st.session_state["_just_txt"] = ""
+
+        with st.expander("➕ Cadastrar nova frase de Justificativa"):
+            nova_just = st.text_area("Texto", key="nova_just_txt", height=80)
+            if st.button("💾 Salvar", key="btn_salvar_just"):
+                if nova_just.strip():
+                    from sheets_nc import adicionar_frase
+                    adicionar_frase("JUST", nova_just.strip())
+                    st.cache_data.clear()
+                    st.success("Frase salva!")
+                    st.rerun()
+
+        if sel_just != "— escrever manualmente —":
+            with st.expander("🗑️ Excluir esta frase"):
+                if st.button("Confirmar exclusão", key="btn_del_just"):
+                    from sheets_nc import excluir_frase
+                    excluir_frase("JUST", sel_just)
+                    st.cache_data.clear()
+                    st.rerun()
 
     # ── Form com campos
     with st.form("f_campos_req"):
@@ -1067,7 +1108,8 @@ def page_gerar_req(reqs, ncs):
 
         c10, c11 = st.columns(2)
         fornecedor = c10.text_input("Fornecedor (Razão Social)", value=_v("EMPRESA"))
-        cnpj       = c11.text_input("CNPJ",                     value="")
+        cnpj_raw   = c11.text_input("CNPJ", placeholder="00.000.000/0000-00")
+        cnpj       = _formatar_cnpj(cnpj_raw)
 
         assunto      = st.text_input("Assunto", value=_v("FINALIDADE", "FINALIDADE"))
 
@@ -1122,38 +1164,39 @@ def page_gerar_req(reqs, ncs):
     st.subheader("2. Itens da Requisição")
 
     with st.form("f_add_item", clear_on_submit=True):
-        ci1, ci2 = st.columns([1, 4])
-        si    = ci1.text_input("Nº Item (pregão) *", placeholder="ex: 42")
-        desc  = ci2.text_input("Descrição do Item *")
-        ci3, ci4, ci5 = st.columns([1, 1, 2])
-        und   = ci3.text_input("Unid.", value="UN")
-        qtd   = ci4.number_input("Qtd", min_value=0.001, value=1.0, step=1.0, format="%.3f")
-        vunit = ci5.number_input("Valor Unit. (R$)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
+        ci1, ci2, ci3 = st.columns([1, 1, 5])
+        item  = ci1.text_input("Item *",    placeholder="ex: 42",  help="Nº do item no pregão")
+        si    = ci2.text_input("Sub-item",  placeholder="ex: 1",   help="Nº do sub-item (se houver)")
+        desc  = ci3.text_input("Descrição do Item *")
+        ci4, ci5, ci6 = st.columns([1, 1, 2])
+        und   = ci4.text_input("Unid.", value="UN")
+        qtd   = ci5.number_input("Qtd", min_value=0.001, value=1.0, step=1.0, format="%.3f")
+        vunit = ci6.number_input("Valor Unit. (R$)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
         add   = st.form_submit_button("➕ Adicionar Item", use_container_width=True)
 
     if add:
-        if si and desc and vunit > 0:
+        if item and desc and vunit > 0:
             total   = round(qtd * vunit, 2)
             ord_num = len(st.session_state.req_itens) + 1
             st.session_state.req_itens.append({
-                "ORD":           str(ord_num),
-                "ITEM":          si,
-                "SI":            si,
+                "ORD":            str(ord_num),
+                "ITEM":           item,
+                "SI":             si,
                 "DESCRICAO_ITEM": desc,
-                "UND":           und,
-                "QTD":           str(qtd).replace(".", ","),
-                "VALOR_UNIT":    fmt(vunit),
-                "VALOR_TOTAL":   fmt(total),
-                "_total":        total,
+                "UND":            und,
+                "QTD":            str(qtd).replace(".", ","),
+                "VALOR_UNIT":     fmt(vunit),
+                "VALOR_TOTAL":    fmt(total),
+                "_total":         total,
             })
             st.rerun()
         else:
-            st.warning("Preencha o Nº do item (pregão), a descrição e o valor unitário.")
+            st.warning("Preencha o Nº do item, a descrição e o valor unitário.")
 
     if st.session_state.req_itens:
         df_it = pd.DataFrame(st.session_state.req_itens)
         st.dataframe(
-            df_it[["ORD", "DESCRICAO_ITEM", "UND", "QTD", "VALOR_UNIT", "VALOR_TOTAL"]],
+            df_it[["ORD", "ITEM", "SI", "DESCRICAO_ITEM", "UND", "QTD", "VALOR_UNIT", "VALOR_TOTAL"]],
             use_container_width=True, hide_index=True,
         )
         total_geral = sum(i["_total"] for i in st.session_state.req_itens)

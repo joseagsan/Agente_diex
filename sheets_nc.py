@@ -212,3 +212,49 @@ def adicionar_req(dados: dict) -> None:
     row_values = [str(linha.get(col, "")) for col in COLUNAS_REQ]
     ws.append_row(row_values, value_input_option="USER_ENTERED")
     logger.info("REQ adicionada para empresa: %s", dados.get("EMPRESA", ""))
+
+
+# ── Frases padrão ─────────────────────────────────────────────────────────────
+ABA_FRASES = "Frases"
+
+
+def ler_frases(tipo: str) -> list[str]:
+    """Retorna lista de textos de frases cadastradas para o tipo (INTRO / JUST)."""
+    try:
+        client = _conectar()
+        planilha = client.open_by_key(SHEET_ID_NC)
+        ws = planilha.worksheet(ABA_FRASES)
+        registros = _ws_para_dicts(ws)
+        return [r["TEXTO"] for r in registros
+                if r.get("TEXTO") and r.get("TIPO", "").upper() == tipo.upper()]
+    except Exception as e:
+        logger.warning("Erro ao ler frases (%s): %s", tipo, e)
+        return []
+
+
+def adicionar_frase(tipo: str, texto: str) -> None:
+    """Adiciona uma frase na aba Frases, criando a aba se não existir."""
+    client = _conectar()
+    planilha = client.open_by_key(SHEET_ID_NC)
+    try:
+        ws = planilha.worksheet(ABA_FRASES)
+    except Exception:
+        ws = planilha.add_worksheet(title=ABA_FRASES, rows=200, cols=2)
+        ws.append_row(["TIPO", "TEXTO"])
+    ws.append_row([tipo.upper(), texto])
+    logger.info("Frase adicionada: %s", tipo)
+
+
+def excluir_frase(tipo: str, texto: str) -> None:
+    """Remove a frase que corresponde exatamente ao tipo e texto."""
+    try:
+        client = _conectar()
+        planilha = client.open_by_key(SHEET_ID_NC)
+        ws = planilha.worksheet(ABA_FRASES)
+        todos = ws.get_all_values()
+        for i, row in enumerate(todos):
+            if len(row) >= 2 and row[0].upper() == tipo.upper() and row[1] == texto:
+                ws.delete_rows(i + 1)
+                return
+    except Exception as e:
+        logger.warning("Erro ao excluir frase: %s", e)
