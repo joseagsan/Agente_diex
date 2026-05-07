@@ -1181,7 +1181,8 @@ def page_gerar_req(reqs, ncs):
             else:
                 with st.spinner("🌐 Buscando no portal contratos.sistema.gov.br..."):
                     try:
-                        from pesquisa_compras import buscar_itens_arp
+                        from pesquisa_compras import buscar_itens_arp, garantir_navegador
+                        garantir_navegador()
                         resultados = buscar_itens_arp(p_ug, p_desc, int(p_max))
                         st.session_state["pesq_resultados"] = resultados
                         if not resultados:

@@ -33,6 +33,31 @@ def playwright_disponivel() -> bool:
         return False
 
 
+def garantir_navegador() -> None:
+    """Instala o navegador Chromium se ainda não estiver presente."""
+    import subprocess
+    import sys
+
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            try:
+                b = p.chromium.launch(headless=True)
+                b.close()
+                return  # já funciona
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    logger.info("Instalando navegador Chromium para Playwright...")
+    subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
+        check=True, capture_output=True,
+    )
+    logger.info("Chromium instalado.")
+
+
 def _parse_br(texto: str) -> float:
     t = str(texto).strip().replace("R$", "").replace("\xa0", "").replace(" ", "")
     if not t:
