@@ -39,15 +39,15 @@ _DARK = dict(
     bar_recv="#3b82f6", bar_emp="#10b981", bar_saldo="#34d399",
 )
 _LIGHT = dict(
-    bg="transparent", card_bg="#ffffff", card_border="#e2e8f0",
-    text="#1e293b", subtext="#64748b", accent="#059669",
+    bg="transparent", card_bg="#f8fafc", card_border="#cbd5e1",
+    text="#0f172a", subtext="#475569", accent="#059669",
     sidebar_bg="#1e293b", sidebar_border="#334155",
-    nav_color="#94a3b8", nav_hover_bg="#334155", nav_hover_color="#f1f5f9",
-    active_bg="linear-gradient(135deg,#065f46,#047857)", active_border="#06996040",
+    nav_color="#94a3b8", nav_hover_bg="#273549", nav_hover_color="#f1f5f9",
+    active_bg="linear-gradient(135deg,#065f46,#047857)", active_border="#06996060",
     active_color="#d1fae5",
     plot_bg="rgba(0,0,0,0)", paper_bg="rgba(0,0,0,0)",
-    grid="#e2e8f0", font_color="#64748b",
-    bar_recv="#2563eb", bar_emp="#059669", bar_saldo="#10b981",
+    grid="#cbd5e1", font_color="#475569",
+    bar_recv="#1d4ed8", bar_emp="#047857", bar_saldo="#059669",
 )
 
 
