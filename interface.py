@@ -973,98 +973,126 @@ def page_gerar_req(reqs, ncs):
 
     if not os.path.exists(TEMPLATE_PATH):
         st.error(f"Template não encontrado: `{TEMPLATE_PATH}`")
-        st.info("Coloque o arquivo `requisicao_empenho_fiel_placeholders.docx` na pasta `templates/`.")
+        st.info("Coloque `requisicao_empenho_fiel_placeholders.docx` em `templates/`.")
         return
 
-    # ── Inicializa session state de itens
     if "req_itens" not in st.session_state:
         st.session_state.req_itens = []
 
-    # ── Pré-preenchimento a partir de uma REQ existente
+    # ── 1. Seletores reativos (fora do form)
     st.subheader("1. Dados do Documento")
+
     nums_req = ["— manual —"] + [
         f"REQ {r.get('REQ','')} · {r.get('EMPRESA','')} · {r.get('VALOR','')}"
         for r in reqs if r.get("EMPRESA")
     ]
-    sel = st.selectbox("Pré-preencher a partir de REQ existente (opcional)", nums_req)
+    sel = st.selectbox("Pré-preencher a partir de REQ existente (opcional)", nums_req, key="gerar_sel_req")
 
     req_base = {}
     if sel != "— manual —":
         idx = nums_req.index(sel) - 1
         req_base = reqs[idx] if idx < len(reqs) else {}
 
-    def _val(campo, default=""):
-        return req_base.get(campo, default)
-
+    # NC selector — ao mudar, preenche campos da NC automaticamente
     nums_nc = [""] + [nc.get("NC", "") for nc in ncs if nc.get("NC")]
-    nc_default = _val("NC")
+    nc_default = req_base.get("NC", "")
     nc_idx = nums_nc.index(nc_default) if nc_default in nums_nc else 0
+    nc_sel = st.selectbox("NC Vinculada *", nums_nc, index=nc_idx, key="gerar_nc_sel")
 
+    # Dados da NC selecionada
+    nc_d = next((nc for nc in ncs if nc.get("NC") == nc_sel), {}) if nc_sel else {}
+    if nc_d:
+        st.info(
+            f"📋 **{nc_sel}** · {nc_d.get('ORGÃO','')} · {nc_d.get('FINALIDADE','')[:55]}"
+            f" · Saldo: {nc_d.get('SALDO NC','')} · Prazo: {nc_d.get('PRAZO','')}"
+        )
+
+    def _v(req_campo, nc_campo=None, default=""):
+        v = req_base.get(req_campo, "")
+        if not v and nc_campo:
+            v = nc_d.get(nc_campo, "")
+        return v or default
+
+    # ── Form com campos
     with st.form("f_campos_req"):
         c1, c2, c3 = st.columns(3)
-        req_id     = c1.text_input("Nº Requisição",        value=_val("REQ"))
-        data_req   = c2.text_input("Data (DD/MM/YYYY)",    value=_val("DATA REQ", datetime.today().strftime("%d/%m/%Y")))
-        ne         = c3.text_input("NE (Nota de Empenho)", value=_val("NE"))
+        req_id   = c1.text_input("Nº Requisição",         value=_v("REQ"))
+        data_req = c2.date_input("Data",                   value=date.today())
+        ne       = c3.text_input("NE (Nota de Empenho)",  value=_v("NE"))
 
         c4, c5, c6 = st.columns(3)
-        nc_sel     = c4.selectbox("NC Vinculada", nums_nc, index=nc_idx)
-        pi         = c5.text_input("PI",          value=_val("PI"))
-        nd         = c6.text_input("ND",          value="")
+        pi    = c4.text_input("PI",    value=_v("PI", "PI"))
+        nd    = c5.text_input("ND",    value=nc_d.get("ND", ""))
+        ptres = c6.text_input("PTRES", value=nc_d.get("PTRES", ""))
 
-        c7, c8 = st.columns(2)
-        fornecedor = c7.text_input("Fornecedor (Razão Social)", value=_val("EMPRESA"))
-        cnpj       = c8.text_input("CNPJ",                     value="")
+        c7, c8, c9 = st.columns(3)
+        tipo = c7.selectbox("Tipo", ["Ordinário", "Especial", "Suprimento de Fundos"],
+                             index=0 if _v("TIPO") != "Especial" else 1)
+        ug   = c8.text_input("UG",  value=nc_d.get("UG", UG_PADRAO))
+        om   = c9.text_input("OM",  value=nc_d.get("OM", OM_PADRAO))
 
-        c9, c10 = st.columns(2)
-        ug         = c9.text_input("UG",  value="160482")
-        om         = c10.text_input("OM", value=OM_PADRAO)
+        c10, c11 = st.columns(2)
+        fornecedor = c10.text_input("Fornecedor (Razão Social)", value=_v("EMPRESA"))
+        cnpj       = c11.text_input("CNPJ",                     value="")
 
-        finalidade = st.text_area("Finalidade / Objeto", value=_val("FINALIDADE"))
-        salvar_campos = st.form_submit_button("✅ Confirmar Dados", type="primary", use_container_width=True)
+        assunto      = st.text_input("Assunto",         value=_v("FINALIDADE", "FINALIDADE"))
+        vigencia_ata = st.text_input("Vigência da ATA", value=nc_d.get("PRAZO", ""))
+        finalidade   = st.text_area("Finalidade / Objeto", value=_v("FINALIDADE", "FINALIDADE"))
 
-    if salvar_campos:
+        salvar = st.form_submit_button("✅ Confirmar Dados", type="primary", use_container_width=True)
+
+    if salvar:
         st.session_state.campos_req = {
-            "requisition_id": req_id,
-            "DATA": data_req,
-            "NE": ne,
-            "NC": nc_sel,
-            "PI": pi,
-            "ND": nd,
+            "requisition_id":  req_id,
+            "DATA":            data_req.strftime("%d/%m/%Y"),
+            "NE":              ne,
+            "NC":              nc_sel,
+            "PI":              pi,
+            "ND":              nd,
+            "PTRES":           ptres,
+            "TIPO":            tipo,
             "FORNECEDOR_NOME": fornecedor,
             "FORNECEDOR_CNPJ": _formatar_cnpj(cnpj),
-            "UG": ug,
-            "OM": om,
-            "FINALIDADE": finalidade,
+            "UG":              ug,
+            "OM":              om,
+            "ASSUNTO":         assunto,
+            "VIGENCIA_ATA":    vigencia_ata,
+            "FINALIDADE":      finalidade,
+            "ORGAO":           nc_d.get("ORGÃO", ""),
+            "PTRES":           ptres,
         }
         st.success("✅ Dados confirmados. Adicione os itens abaixo.")
 
-    # ── Tabela de itens
+    if st.session_state.get("campos_req"):
+        with st.expander("📋 Dados confirmados", expanded=False):
+            for k, v in st.session_state.campos_req.items():
+                if k != "requisition_id":
+                    st.text(f"{k}: {v}")
+
+    # ── 2. Itens
     st.divider()
     st.subheader("2. Itens da Requisição")
 
     with st.form("f_add_item", clear_on_submit=True):
-        ci1, ci2, ci3, ci4 = st.columns([4, 1, 1, 1])
-        desc     = ci1.text_input("Descrição do Item *")
-        und      = ci2.text_input("Unid.", value="UN")
-        qtd      = ci3.number_input("Qtd", min_value=0.001, value=1.0, step=0.001, format="%.3f")
-        vunit    = ci4.number_input("Valor Unit. (R$)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-        si       = st.text_input("SI (catálogo, opcional)")
-        add_item = st.form_submit_button("➕ Adicionar Item", use_container_width=True)
+        ci1, ci2, ci3, ci4 = st.columns([4, 1, 1, 2])
+        desc  = ci1.text_input("Descrição do Item *")
+        und   = ci2.text_input("Unid.", value="UN")
+        qtd   = ci3.number_input("Qtd", min_value=0.001, value=1.0, step=1.0, format="%.3f")
+        vunit = ci4.number_input("Valor Unit. (R$)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
+        si    = st.text_input("SI (catálogo, opcional)")
+        add   = st.form_submit_button("➕ Adicionar Item", use_container_width=True)
 
-    if add_item:
+    if add:
         if desc and vunit > 0:
-            total = round(qtd * vunit, 2)
+            total   = round(qtd * vunit, 2)
             ord_num = len(st.session_state.req_itens) + 1
             st.session_state.req_itens.append({
-                "ORD":           str(ord_num),
-                "ITEM":          str(ord_num),
-                "SI":            si,
-                "DESCRICAO_ITEM": desc,
-                "UND":           und,
-                "QTD":           str(qtd).replace(".", ","),
-                "VALOR_UNIT":    fmt(vunit),
-                "VALOR_TOTAL":   fmt(total),
-                "_total":        total,
+                "ORD": str(ord_num), "ITEM": str(ord_num), "SI": si,
+                "DESCRICAO_ITEM": desc, "UND": und,
+                "QTD":        str(qtd).replace(".", ","),
+                "VALOR_UNIT": fmt(vunit),
+                "VALOR_TOTAL": fmt(total),
+                "_total":     total,
             })
             st.rerun()
         else:
@@ -1077,39 +1105,35 @@ def page_gerar_req(reqs, ncs):
             use_container_width=True, hide_index=True,
         )
         total_geral = sum(i["_total"] for i in st.session_state.req_itens)
-        st.metric("💰 Total Geral", fmt(total_geral))
-
-        cr, _ = st.columns([1, 3])
-        with cr:
+        k1, k2 = st.columns([1, 3])
+        k1.metric("💰 Total Geral", fmt(total_geral))
+        with k2:
             if st.button("🗑️ Limpar todos os itens"):
                 st.session_state.req_itens = []
                 st.rerun()
     else:
         st.info("Nenhum item adicionado ainda.")
 
-    # ── Gerar documento
+    # ── 3. Gerar
     st.divider()
     st.subheader("3. Gerar Documento")
 
-    if st.button("📄 Gerar DOCX", type="primary", use_container_width=False):
+    if st.button("📄 Gerar DOCX", type="primary"):
         campos = st.session_state.get("campos_req", {})
         itens  = st.session_state.req_itens
 
         if not campos:
-            st.error("Confirme os dados do documento primeiro (passo 1).")
+            st.error("Confirme os dados do documento primeiro (Passo 1).")
         elif not itens:
-            st.error("Adicione pelo menos um item (passo 2).")
+            st.error("Adicione pelo menos um item (Passo 2).")
         else:
             try:
                 from gerador import gerar_para_bytes
-
-                total_geral = sum(i["_total"] for i in itens)
+                total_geral   = sum(i["_total"] for i in itens)
                 campos_finais = {**campos, "TOTAL": fmt(total_geral)}
                 itens_limpos  = [{k: v for k, v in i.items() if not k.startswith("_")} for i in itens]
-
-                doc_bytes = gerar_para_bytes(TEMPLATE_PATH, campos_finais, itens_limpos)
-
-                nome_arq = f"REQ_{campos.get('requisition_id','')}.docx"
+                doc_bytes     = gerar_para_bytes(TEMPLATE_PATH, campos_finais, itens_limpos)
+                nome_arq      = f"REQ_{campos.get('requisition_id', 'doc')}.docx"
                 st.download_button(
                     "⬇️ Baixar Documento",
                     data=doc_bytes,
@@ -1117,7 +1141,7 @@ def page_gerar_req(reqs, ncs):
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
                 )
-                st.success(f"✅ {nome_arq} gerado com sucesso!")
+                st.success(f"✅ {nome_arq} pronto para download!")
             except Exception as e:
                 st.error(f"Erro ao gerar documento: {e}")
 

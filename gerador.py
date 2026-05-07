@@ -177,6 +177,28 @@ def _popular_tabela_itens(tabela, linha_template, itens: list[dict]) -> None:
 # Funções principais
 # ---------------------------------------------------------------------------
 
+def _aplicar_bordas(tabela) -> None:
+    """Garante bordas visíveis em todas as células da tabela de itens."""
+    from docx.oxml import OxmlElement
+
+    for linha in tabela.rows:
+        for celula in linha.cells:
+            tc   = celula._tc
+            tcPr = tc.get_or_add_tcPr()
+            # remove borders anteriores para não duplicar
+            for old in tcPr.findall(qn("w:tcBorders")):
+                tcPr.remove(old)
+            tcBorders = OxmlElement("w:tcBorders")
+            for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                tag = OxmlElement(f"w:{side}")
+                tag.set(qn("w:val"),   "single")
+                tag.set(qn("w:sz"),    "6")
+                tag.set(qn("w:space"), "0")
+                tag.set(qn("w:color"), "000000")
+                tcBorders.append(tag)
+            tcPr.append(tcBorders)
+
+
 def gerar_para_bytes(template_path: str, campos: dict, itens: list[dict]) -> bytes:
     """Gera o documento DOCX em memória e retorna como bytes (para download no Streamlit)."""
     import io
@@ -191,6 +213,7 @@ def gerar_para_bytes(template_path: str, campos: dict, itens: list[dict]) -> byt
 
     if tabela_itens is not None and itens:
         _popular_tabela_itens(tabela_itens, linha_template, itens)
+        _aplicar_bordas(tabela_itens)
 
     buf = io.BytesIO()
     doc.save(buf)
