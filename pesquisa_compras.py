@@ -38,24 +38,34 @@ def garantir_navegador() -> None:
     import subprocess
     import sys
 
+    # Verifica se já funciona
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            try:
-                b = p.chromium.launch(headless=True)
-                b.close()
-                return  # já funciona
-            except Exception:
-                pass
+            b = p.chromium.launch(headless=True)
+            b.close()
+            return
     except Exception:
         pass
 
-    logger.info("Instalando navegador Chromium para Playwright...")
-    subprocess.run(
+    logger.info("Instalando Chromium para Playwright...")
+    # Tenta com deps; se falhar (sem permissão apt), tenta sem
+    for cmd in [
         [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
-        check=True, capture_output=True,
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+    ]:
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=300)
+            if r.returncode == 0:
+                logger.info("Chromium instalado com sucesso.")
+                return
+        except Exception:
+            continue
+
+    raise RuntimeError(
+        "Não foi possível instalar o Chromium. "
+        "Execute manualmente: playwright install chromium"
     )
-    logger.info("Chromium instalado.")
 
 
 def _parse_br(texto: str) -> float:

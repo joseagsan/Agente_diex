@@ -227,9 +227,8 @@ def ler_frases(tipo: str) -> list[str]:
         registros = _ws_para_dicts(ws)
         return [r["TEXTO"] for r in registros
                 if r.get("TEXTO") and r.get("TIPO", "").upper() == tipo.upper()]
-    except Exception as e:
-        logger.warning("Erro ao ler frases (%s): %s", tipo, e)
-        return []
+    except Exception:
+        return []  # aba Frases ainda não existe — sem aviso
 
 
 def adicionar_frase(tipo: str, texto: str) -> None:
