@@ -174,8 +174,29 @@ def _popular_tabela_itens(tabela, linha_template, itens: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Função principal
+# Funções principais
 # ---------------------------------------------------------------------------
+
+def gerar_para_bytes(template_path: str, campos: dict, itens: list[dict]) -> bytes:
+    """Gera o documento DOCX em memória e retorna como bytes (para download no Streamlit)."""
+    import io
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Template não encontrado: {template_path}")
+
+    doc = Document(template_path)
+    tabela_itens, linha_template = _encontrar_tabela_itens(doc)
+    linha_template_xml = linha_template._tr if tabela_itens else None
+
+    _substituir_tudo(doc, campos, ignorar_linha_xml=linha_template_xml)
+
+    if tabela_itens is not None and itens:
+        _popular_tabela_itens(tabela_itens, linha_template, itens)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
 
 def gerar_documento(
     template_path: str,
