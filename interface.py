@@ -21,59 +21,120 @@ logging.basicConfig(level=logging.INFO)
 
 from auth import logout, requer_auth
 from config import ANTHROPIC_API_KEY, OM_PADRAO, UG_PADRAO, SHEET_ID_NC
-from relatorios import exportar_excel, kpis, ncs_por_operacao, ncs_vencendo
+from relatorios import (
+    exportar_excel, kpis, ncs_por_operacao, ncs_vencendo,
+    relatorio_extrato_nc, relatorio_por_empresa, relatorio_saldo_pi, relatorio_saldo_nd,
+)
 
-# ── CSS (apenas layout e sidebar) ────────────────────────────────────────────
-st.markdown("""
+# ── Tema ─────────────────────────────────────────────────────────────────────
+_DARK = dict(
+    bg="transparent", card_bg="#0d1829", card_border="#1a2540",
+    text="#e2e8f0", subtext="#64748b", accent="#34d399",
+    sidebar_bg="#080e1a", sidebar_border="#1a2540",
+    nav_color="#4b6080", nav_hover_bg="#0f1f35", nav_hover_color="#c8d8e8",
+    active_bg="linear-gradient(135deg,#052918,#073d22)", active_border="#0a4a2840",
+    active_color="#34d399",
+    plot_bg="rgba(0,0,0,0)", paper_bg="rgba(0,0,0,0)",
+    grid="#1a2540", font_color="#64748b",
+    bar_recv="#3b82f6", bar_emp="#10b981", bar_saldo="#34d399",
+)
+_LIGHT = dict(
+    bg="transparent", card_bg="#ffffff", card_border="#e2e8f0",
+    text="#1e293b", subtext="#64748b", accent="#059669",
+    sidebar_bg="#1e293b", sidebar_border="#334155",
+    nav_color="#94a3b8", nav_hover_bg="#334155", nav_hover_color="#f1f5f9",
+    active_bg="linear-gradient(135deg,#065f46,#047857)", active_border="#06996040",
+    active_color="#d1fae5",
+    plot_bg="rgba(0,0,0,0)", paper_bg="rgba(0,0,0,0)",
+    grid="#e2e8f0", font_color="#64748b",
+    bar_recv="#2563eb", bar_emp="#059669", bar_saldo="#10b981",
+)
+
+
+def _t() -> dict:
+    return _LIGHT if st.session_state.get("tema_claro") else _DARK
+
+
+def _inject_css():
+    t = _t()
+    st.markdown(f"""
 <style>
-#MainMenu, footer, header {visibility:hidden;}
-.block-container {padding:1.5rem 2rem 3rem !important; max-width:100% !important;}
+#MainMenu, footer, header {{visibility:hidden;}}
+.block-container {{padding:1.5rem 2rem 3rem !important; max-width:100% !important;}}
 
-section[data-testid="stSidebar"] {width:230px !important; min-width:230px !important;}
-section[data-testid="stSidebar"] > div:first-child {
-    background:#080e1a !important;
-    border-right:1px solid #1a2540 !important;
-}
-
-/* Nav buttons */
-section[data-testid="stSidebar"] [data-testid="baseButton-secondary"] {
+section[data-testid="stSidebar"] {{width:230px !important; min-width:230px !important;}}
+section[data-testid="stSidebar"] > div:first-child {{
+    background:{t['sidebar_bg']} !important;
+    border-right:1px solid {t['sidebar_border']} !important;
+}}
+section[data-testid="stSidebar"] [data-testid="baseButton-secondary"] {{
     text-align:left !important; justify-content:flex-start !important;
     background:transparent !important; border:none !important;
-    color:#4b6080 !important; font-size:.875rem !important; font-weight:500 !important;
+    color:{t['nav_color']} !important; font-size:.875rem !important; font-weight:500 !important;
     padding:9px 12px !important; border-radius:8px !important; margin:1px 0 !important;
-}
-section[data-testid="stSidebar"] [data-testid="baseButton-secondary"]:hover {
-    background:#0f1f35 !important; color:#c8d8e8 !important;
-}
-section[data-testid="stSidebar"] [data-testid="baseButton-primary"] {
+}}
+section[data-testid="stSidebar"] [data-testid="baseButton-secondary"]:hover {{
+    background:{t['nav_hover_bg']} !important; color:{t['nav_hover_color']} !important;
+}}
+section[data-testid="stSidebar"] [data-testid="baseButton-primary"] {{
     text-align:left !important; justify-content:flex-start !important;
-    background:linear-gradient(135deg,#052918,#073d22) !important;
-    border:1px solid #0a4a2840 !important; color:#34d399 !important;
-    font-size:.875rem !important; font-weight:600 !important;
+    background:{t['active_bg']} !important; border:1px solid {t['active_border']} !important;
+    color:{t['active_color']} !important; font-size:.875rem !important; font-weight:600 !important;
     padding:9px 12px !important; border-radius:8px !important; margin:1px 0 !important;
-}
-section[data-testid="stSidebar"] [data-testid="baseButton-primary"]:hover {
-    background:linear-gradient(135deg,#063520,#094d2a) !important;
-}
-section[data-testid="stSidebar"] hr {border-color:#1a2540 !important; margin:8px 0 !important;}
+}}
+section[data-testid="stSidebar"] [data-testid="baseButton-primary"]:hover {{
+    filter:brightness(1.1);
+}}
+section[data-testid="stSidebar"] hr {{border-color:{t['sidebar_border']} !important; margin:8px 0 !important;}}
 
-[data-testid="stDataFrame"] {border:1px solid #1a2540 !important; border-radius:10px !important;}
-[data-testid="stForm"] {background:#0d1829 !important; border:1px solid #1a2540 !important; border-radius:12px;}
-[data-testid="stExpander"] {border:1px solid #1a2540 !important; border-radius:10px !important;}
-hr {border-color:#1a2540 !important;}
+[data-testid="stDataFrame"] {{border:1px solid {t['card_border']} !important; border-radius:10px !important;}}
+[data-testid="stForm"] {{background:{t['card_bg']} !important; border:1px solid {t['card_border']} !important; border-radius:12px;}}
+[data-testid="stExpander"] {{border:1px solid {t['card_border']} !important; border-radius:10px !important;}}
+hr {{border-color:{t['card_border']} !important;}}
+
+/* KPI cards */
+.kpi-card {{
+    background:{t['card_bg']}; border:1px solid {t['card_border']};
+    border-radius:12px; padding:16px 20px; position:relative; overflow:hidden;
+}}
+.kpi-card .kpi-label {{font-size:.75rem; color:{t['subtext']}; text-transform:uppercase; letter-spacing:.8px; margin-bottom:6px;}}
+.kpi-card .kpi-value {{font-size:1.45rem; font-weight:800; color:{t['text']};}}
+.kpi-card .kpi-delta {{font-size:.75rem; color:{t['subtext']}; margin-top:4px;}}
+.kpi-card .kpi-stripe {{position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:12px 0 0 12px;}}
 </style>
 """, unsafe_allow_html=True)
 
-_CL = dict(
-    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#64748b",
-    margin=dict(l=0, r=0, t=20, b=0),
-    xaxis=dict(gridcolor="#1a2540", zerolinecolor="#1a2540"),
-    yaxis=dict(gridcolor="#1a2540", zerolinecolor="#1a2540"),
-    legend=dict(orientation="h", y=1.15, font=dict(size=11)),
-)
+
+def _kpi_card(label: str, value: str, delta: str = "", color: str = "#34d399"):
+    st.markdown(f"""
+<div class="kpi-card">
+  <div class="kpi-stripe" style="background:{color};"></div>
+  <div style="padding-left:8px;">
+    <div class="kpi-label">{label}</div>
+    <div class="kpi-value">{value}</div>
+    <div class="kpi-delta">{delta}</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+
+def _cl() -> dict:
+    t = _t()
+    return dict(
+        paper_bgcolor=t["paper_bg"], plot_bgcolor=t["plot_bg"], font_color=t["font_color"],
+        margin=dict(l=0, r=0, t=20, b=0),
+        xaxis=dict(gridcolor=t["grid"], zerolinecolor=t["grid"]),
+        yaxis=dict(gridcolor=t["grid"], zerolinecolor=t["grid"]),
+        legend=dict(orientation="h", y=1.15, font=dict(size=11)),
+    )
+
 
 ORGAOS = ["COTER", "COEX", "DGO", "DEC", "DECEX", "12 RM", "Outro"]
 SITUACOES_REQ = ["Pendente", "Enviada", "Aprovada", "Empenhada", "Liquidada", "Paga"]
+TIPOS_RELATORIO = [
+    "Resumo Geral", "NCs Detalhado", "Requisições Detalhado",
+    "NCs por Operação", "NCs Próximas do Vencimento (30 dias)", "REQs Pendentes",
+    "Extrato por NC", "REQs por Empresa", "Saldo por PI", "Saldo por ND",
+]
 NAV = [
     ("📊", "Dashboard",        "dashboard"),
     ("📋", "Notas de Crédito", "ncs"),
@@ -83,6 +144,7 @@ NAV = [
     ("📈", "Relatórios",       "relatorios"),
     ("🤖", "Assistente",       "assistente"),
 ]
+LINK_SHEETS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID_NC}/edit"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -112,9 +174,15 @@ def _load():
     return ler_ncs(), ler_reqs(), ler_fornecedores()
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def _kpis_cached(ncs_tuple, reqs_tuple):
+    return kpis(list(ncs_tuple), list(reqs_tuple))
+
+
 def carregar(forcar: bool = False):
     if forcar:
         _load.clear()
+        _kpis_cached.clear()
     try:
         return _load()
     except Exception as e:
@@ -132,11 +200,12 @@ def carregar(forcar: bool = False):
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 def _sidebar(ncs, reqs) -> str:
+    t = _t()
     with st.sidebar:
         st.markdown(f"""
-        <div style="padding:16px 8px 14px;border-bottom:1px solid #1a2540;margin-bottom:8px;">
+        <div style="padding:16px 8px 14px;border-bottom:1px solid {t['sidebar_border']};margin-bottom:8px;">
             <div style="font-size:1.3rem;font-weight:900;color:#e2e8f0;letter-spacing:1px;">🪖 SSAC</div>
-            <div style="font-size:.72rem;color:#4b6080;margin-top:3px;line-height:1.5">
+            <div style="font-size:.72rem;color:{t['nav_color']};margin-top:3px;line-height:1.5">
                 {OM_PADRAO}<br>UG {UG_PADRAO}
             </div>
         </div>""", unsafe_allow_html=True)
@@ -152,12 +221,15 @@ def _sidebar(ncs, reqs) -> str:
         st.divider()
 
         if ncs or reqs:
-            ind = kpis(ncs, reqs)
+            ind = _kpis_cached(tuple(str(n) for n in ncs), tuple(str(r) for r in reqs))
             st.markdown(f"""
             <div style="padding:4px 6px 8px;font-size:.78rem;">
-                <div style="color:#4b6080;font-size:.63rem;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Resumo</div>
+                <div style="color:{t['nav_color']};font-size:.63rem;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Resumo</div>
                 <div style="display:flex;justify-content:space-between;margin-bottom:5px;color:#8ba0b8">
-                    <span>Saldo</span><span style="color:#34d399;font-weight:700">{fmt(ind['saldo_total'])}</span>
+                    <span>Recebido</span><span style="color:#3b82f6;font-weight:700">{fmt(ind['recebido_total'])}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:5px;color:#8ba0b8">
+                    <span>Saldo</span><span style="color:{t['accent']};font-weight:700">{fmt(ind['saldo_total'])}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;margin-bottom:5px;color:#8ba0b8">
                     <span>EM TELA</span><span style="color:#fbbf24;font-weight:700">{ind['ncs_em_tela']} NCs</span>
@@ -168,6 +240,7 @@ def _sidebar(ncs, reqs) -> str:
             </div>""", unsafe_allow_html=True)
             st.divider()
 
+        # Controles
         c1, c2 = st.columns(2)
         with c1:
             if st.button("🔄 Sync", use_container_width=True, help="Recarregar dados"):
@@ -176,6 +249,19 @@ def _sidebar(ncs, reqs) -> str:
             if st.button("🚪 Sair", use_container_width=True):
                 logout()
 
+        # Tema
+        tema_claro = st.toggle("☀️ Tema Claro", value=st.session_state.get("tema_claro", False))
+        if tema_claro != st.session_state.get("tema_claro", False):
+            st.session_state["tema_claro"] = tema_claro
+            st.rerun()
+
+        # Link planilha
+        st.markdown(
+            f'<a href="{LINK_SHEETS}" target="_blank" style="font-size:.75rem;color:{t["nav_color"]};'
+            f'text-decoration:none;display:block;padding:4px 0;">📊 Abrir Planilha ↗</a>',
+            unsafe_allow_html=True,
+        )
+
         st.caption(f"Sync {datetime.now().strftime('%H:%M:%S')}")
 
     return st.session_state.get("page", "dashboard")
@@ -183,25 +269,48 @@ def _sidebar(ncs, reqs) -> str:
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 def page_dashboard(ncs, reqs):
+    t = _t()
     st.title("📊 Dashboard")
     st.caption(f"{OM_PADRAO} · {datetime.today().strftime('%d/%m/%Y')}")
 
-    ind = kpis(ncs, reqs)
+    # Filtros do dashboard
+    with st.expander("🔍 Filtros", expanded=False):
+        f1, f2, f3 = st.columns(3)
+        f_org = f1.multiselect("Órgão",    sorted({nc.get("ORGÃO", "") for nc in ncs if nc.get("ORGÃO")}))
+        f_op  = f2.multiselect("Operação", sorted({nc.get("OP", "")    for nc in ncs if nc.get("OP")}))
+        f_sit = f3.multiselect("Status NC", ["OK", "EM TELA"])
+
+    ncs_f = [nc for nc in ncs
+             if (not f_org or nc.get("ORGÃO") in f_org)
+             and (not f_op  or nc.get("OP")    in f_op)
+             and (not f_sit or nc.get("SITU")  in f_sit)]
+
+    ind = kpis(ncs_f, reqs)
     total_rec = ind["recebido_total"]
     pct_emp = (ind["empenhado_total"] / total_rec * 100) if total_rec else 0
+    pct_saldo = (ind["saldo_total"] / total_rec * 100) if total_rec else 0
 
-    # KPIs nativos
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("💰 Saldo Disponível",  fmt(ind["saldo_total"]),
-              delta=f"{ind['ncs_ok']} NCs OK", delta_color="off")
-    k2.metric("📌 Empenhado",         fmt(ind["empenhado_total"]),
-              delta=f"{pct_emp:.1f}% do recebido", delta_color="off")
-    k3.metric("🕐 Em Tela",           fmt(ind["em_tela_total"]),
-              delta=f"{ind['ncs_em_tela']} NCs aguardando", delta_color="off")
-    k4.metric("📝 REQs Pendentes",    str(ind["reqs_pendentes"]),
-              delta=fmt(ind["valor_reqs_pendentes"]), delta_color="off")
+    # KPI cards (5 colunas)
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1:
+        _kpi_card("💰 Total Recebido", fmt(total_rec),
+                  f"{ind['total_ncs']} NCs · {pct_saldo:.1f}% em saldo", "#3b82f6")
+    with k2:
+        _kpi_card("✅ Saldo Disponível", fmt(ind["saldo_total"]),
+                  f"{ind['ncs_ok']} NCs OK", t["accent"])
+    with k3:
+        _kpi_card("📌 Empenhado", fmt(ind["empenhado_total"]),
+                  f"{pct_emp:.1f}% do recebido", "#f59e0b")
+    with k4:
+        _kpi_card("🕐 Em Tela", fmt(ind["em_tela_total"]),
+                  f"{ind['ncs_em_tela']} NCs aguardando", "#fbbf24")
+    with k5:
+        _kpi_card("📝 REQs Pendentes", str(ind["reqs_pendentes"]),
+                  fmt(ind["valor_reqs_pendentes"]), "#a78bfa")
 
-    # Alertas nativos
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+    # Alertas
     if ind["vencidas"] > 0:
         st.error(f"⛔ **{ind['vencidas']}** NC(s) com prazo vencido!")
     if ind["vencendo_7d"] > 0:
@@ -216,7 +325,7 @@ def page_dashboard(ncs, reqs):
     with c1:
         st.subheader("📅 Valores Recebidos por Mês")
         rows = []
-        for nc in ncs:
+        for nc in ncs_f:
             try:
                 d = datetime.strptime(nc.get("DATA NC", ""), "%d/%m/%Y")
                 rows.append({"Mês": d.strftime("%b/%y"), "Ord": d.strftime("%Y-%m"),
@@ -227,21 +336,21 @@ def page_dashboard(ncs, reqs):
         if rows:
             df_m = pd.DataFrame(rows).groupby(["Mês", "Ord"]).sum().reset_index().sort_values("Ord")
             fig = go.Figure()
-            fig.add_bar(x=df_m["Mês"], y=df_m["Recebido"],  name="Recebido",  marker_color="#3b82f6")
-            fig.add_bar(x=df_m["Mês"], y=df_m["Empenhado"], name="Empenhado", marker_color="#10b981")
-            fig.update_layout(height=320, barmode="group", **_CL)
+            fig.add_bar(x=df_m["Mês"], y=df_m["Recebido"],  name="Recebido",  marker_color=t["bar_recv"])
+            fig.add_bar(x=df_m["Mês"], y=df_m["Empenhado"], name="Empenhado", marker_color=t["bar_emp"])
+            fig.update_layout(height=300, barmode="group", **_cl())
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Sem dados de data para gráfico mensal.")
 
     with c2:
         st.subheader("🔵 Status das NCs")
-        if ncs:
-            cnt = pd.DataFrame(ncs)["SITU"].value_counts().reset_index()
+        if ncs_f:
+            cnt = pd.DataFrame(ncs_f)["SITU"].value_counts().reset_index()
             cnt.columns = ["Status", "Qtd"]
             fig = px.pie(cnt, values="Qtd", names="Status", hole=0.55,
-                         color_discrete_map={"OK": "#10b981", "EM TELA": "#fbbf24"})
-            fig.update_layout(height=320, **{**_CL, "margin": dict(l=0, r=0, t=20, b=30)})
+                         color_discrete_map={"OK": t["bar_emp"], "EM TELA": "#fbbf24"})
+            fig.update_layout(height=300, **{**_cl(), "margin": dict(l=0, r=0, t=20, b=30)})
             fig.update_traces(textfont_color="#e2e8f0", textinfo="percent+label")
             st.plotly_chart(fig, use_container_width=True)
 
@@ -249,34 +358,33 @@ def page_dashboard(ncs, reqs):
     c3, c4 = st.columns(2)
     with c3:
         st.subheader("🎯 Saldo por Operação")
-        if ncs:
+        if ncs_f:
             df_op = (pd.DataFrame([{"OP": nc.get("OP") or "Sem OP",
-                                     "Saldo": parse(nc.get("SALDO NC", 0))} for nc in ncs])
+                                     "Saldo": parse(nc.get("SALDO NC", 0))} for nc in ncs_f])
                      .groupby("OP")["Saldo"].sum().reset_index()
                      .query("Saldo > 0").sort_values("Saldo"))
             if not df_op.empty:
                 fig = px.bar(df_op, x="Saldo", y="OP", orientation="h",
-                             color="Saldo",
-                             color_continuous_scale=["#1a4a2e", "#10b981"],
+                             color="Saldo", color_continuous_scale=["#1a4a2e", t["bar_emp"]],
                              labels={"Saldo": "R$", "OP": ""})
                 fig.update_coloraxes(showscale=False)
-                fig.update_layout(height=340, **_CL)
+                fig.update_layout(height=320, **_cl())
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.success("Sem saldo disponível no momento.")
 
     with c4:
         st.subheader("🏛️ Recebido vs Empenhado por Órgão")
-        if ncs:
+        if ncs_f:
             df_o = (pd.DataFrame([{"ORGÃO": nc.get("ORGÃO") or "N/A",
                                     "Recebido": parse(nc.get("RECEBIDO", 0)),
-                                    "Empenhado": parse(nc.get("EMPENHADO", 0))} for nc in ncs])
+                                    "Empenhado": parse(nc.get("EMPENHADO", 0))} for nc in ncs_f])
                     .groupby("ORGÃO").sum().reset_index()
                     .melt(id_vars="ORGÃO", var_name="Tipo", value_name="Valor"))
             fig = px.bar(df_o, x="ORGÃO", y="Valor", color="Tipo", barmode="group",
-                         color_discrete_map={"Recebido": "#3b82f6", "Empenhado": "#10b981"},
+                         color_discrete_map={"Recebido": t["bar_recv"], "Empenhado": t["bar_emp"]},
                          labels={"Valor": "R$", "ORGÃO": ""})
-            fig.update_layout(height=340, **_CL)
+            fig.update_layout(height=320, **_cl())
             st.plotly_chart(fig, use_container_width=True)
 
     # Gráfico 3: REQs por situação + NCs EM TELA
@@ -289,15 +397,15 @@ def page_dashboard(ncs, reqs):
                     .groupby("Situação")["Valor"].sum().reset_index()
                     .sort_values("Valor", ascending=False))
             cores = {"Pendente": "#fbbf24", "Enviada": "#a78bfa", "Aprovada": "#60a5fa",
-                     "Empenhada": "#3b82f6", "Liquidada": "#10b981", "Paga": "#34d399"}
+                     "Empenhada": t["bar_recv"], "Liquidada": t["bar_emp"], "Paga": t["bar_saldo"]}
             fig = px.bar(df_s, x="Situação", y="Valor", color="Situação",
                          color_discrete_map=cores, labels={"Valor": "R$", "Situação": ""})
-            fig.update_layout(height=320, **_CL, showlegend=False)
+            fig.update_layout(height=300, **_cl(), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
     with c6:
         st.subheader("🕐 NCs EM TELA")
-        em_tela = [nc for nc in ncs if nc.get("SITU") == "EM TELA"]
+        em_tela = [nc for nc in ncs_f if nc.get("SITU") == "EM TELA"]
         if em_tela:
             total_et = sum(parse(nc.get("RECEBIDO", 0)) for nc in em_tela)
             st.warning(f"⚠️ {len(em_tela)} NCs em tela — {fmt(total_et)}")
@@ -306,31 +414,40 @@ def page_dashboard(ncs, reqs):
                 "Finalidade": nc.get("FINALIDADE", "")[:38],
                 "Valor": nc.get("RECEBIDO", ""), "Prazo": nc.get("PRAZO", ""),
             } for nc in em_tela])
-            st.dataframe(df_et, use_container_width=True, hide_index=True, height=260)
+            st.dataframe(df_et, use_container_width=True, hide_index=True, height=240)
         else:
             st.success("✅ Nenhuma NC EM TELA no momento.")
 
-    # Gráfico 4: Valores totais por operação
+    # Gráfico 4: Valores por operação
     st.subheader("💹 Valores por Operação")
-    if ncs:
+    if ncs_f:
         df_vop = (pd.DataFrame([{"OP": nc.get("OP") or "Sem OP",
                                   "Recebido": parse(nc.get("RECEBIDO", 0)),
                                   "Empenhado": parse(nc.get("EMPENHADO", 0)),
-                                  "Saldo": parse(nc.get("SALDO NC", 0))} for nc in ncs])
+                                  "Saldo": parse(nc.get("SALDO NC", 0))} for nc in ncs_f])
                   .groupby("OP").sum().reset_index().sort_values("Recebido", ascending=False))
         fig = go.Figure()
-        fig.add_bar(x=df_vop["OP"], y=df_vop["Recebido"],  name="Recebido",  marker_color="#3b82f6")
+        fig.add_bar(x=df_vop["OP"], y=df_vop["Recebido"],  name="Recebido",  marker_color=t["bar_recv"])
         fig.add_bar(x=df_vop["OP"], y=df_vop["Empenhado"], name="Empenhado", marker_color="#fbbf24")
-        fig.add_bar(x=df_vop["OP"], y=df_vop["Saldo"],     name="Saldo",     marker_color="#10b981")
-        fig.update_layout(barmode="group", height=320, **_CL)
+        fig.add_bar(x=df_vop["OP"], y=df_vop["Saldo"],     name="Saldo",     marker_color=t["bar_emp"])
+        fig.update_layout(barmode="group", height=300, **_cl())
         st.plotly_chart(fig, use_container_width=True)
 
-    # Tabela de prazos
+    # Controle de prazos
     st.subheader("⏰ Controle de Prazos")
-    if ncs:
+    col_link, _ = st.columns([1, 5])
+    with col_link:
+        st.markdown(
+            f'<a href="{LINK_SHEETS}" target="_blank">'
+            f'<button style="background:#1a2540;color:#94a3b8;border:1px solid #1a2540;'
+            f'border-radius:6px;padding:4px 12px;font-size:.8rem;cursor:pointer;">'
+            f'📊 Abrir Planilha</button></a>',
+            unsafe_allow_html=True,
+        )
+    if ncs_f:
         hoje = date.today()
         rows = []
-        for nc in ncs:
+        for nc in ncs_f:
             p = nc.get("PRAZO", "")
             try:
                 dias = (datetime.strptime(p, "%d/%m/%Y").date() - hoje).days
@@ -381,13 +498,22 @@ def page_ncs(ncs):
                 continue
         filtradas.append(nc)
 
-    b1, b2 = st.columns([1, 3])
+    b1, b2, b3 = st.columns([1, 1, 3])
     with b1:
         if st.button("➕ Nova NC", type="primary", use_container_width=True):
             st.session_state["form_nc"] = not st.session_state.get("form_nc", False)
     with b2:
+        st.markdown(
+            f'<a href="{LINK_SHEETS}" target="_blank">'
+            f'<button style="background:transparent;color:#64748b;border:1px solid #1a2540;'
+            f'border-radius:6px;padding:6px 12px;font-size:.85rem;cursor:pointer;width:100%;">'
+            f'📊 Planilha</button></a>',
+            unsafe_allow_html=True,
+        )
+    with b3:
         saldo_f = sum(parse(nc.get("SALDO NC", 0)) for nc in filtradas)
-        st.info(f"📋 **{len(filtradas)}** NCs · Saldo filtrado: **{fmt(saldo_f)}**")
+        receb_f = sum(parse(nc.get("RECEBIDO", 0)) for nc in filtradas)
+        st.info(f"📋 **{len(filtradas)}** NCs · Recebido: **{fmt(receb_f)}** · Saldo: **{fmt(saldo_f)}**")
 
     if st.session_state.get("form_nc"):
         _form_nc()
@@ -465,11 +591,19 @@ def page_reqs(reqs, ncs):
                  and (not f_pi  or r.get("PI")       in f_pi)
                  and f_val[0] <= parse(r.get("VALOR", 0)) <= f_val[1]]
 
-    b1, b2 = st.columns([1, 3])
+    b1, b2, b3 = st.columns([1, 1, 3])
     with b1:
         if st.button("➕ Nova REQ", type="primary", use_container_width=True):
             st.session_state["form_req"] = not st.session_state.get("form_req", False)
     with b2:
+        st.markdown(
+            f'<a href="{LINK_SHEETS}" target="_blank">'
+            f'<button style="background:transparent;color:#64748b;border:1px solid #1a2540;'
+            f'border-radius:6px;padding:6px 12px;font-size:.85rem;cursor:pointer;width:100%;">'
+            f'📊 Planilha</button></a>',
+            unsafe_allow_html=True,
+        )
+    with b3:
         total = sum(parse(r.get("VALOR", 0)) for r in filtradas)
         st.info(f"📝 **{len(filtradas)}** REQs · Total: **{fmt(total)}**")
 
@@ -618,14 +752,15 @@ def _confirmar_req(dados, ncs):
 def page_importar(ncs, reqs):
     st.title("📥 Importar Dados")
 
-    st.subheader("🔗 Status da Conexão")
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("NCs carregadas",    len(ncs))
-    k2.metric("REQs carregadas",   len(reqs))
-    k3.metric("NCs OK",            sum(1 for nc in ncs if nc.get("SITU") == "OK"))
-    k4.metric("REQs Pendentes",    sum(1 for r  in reqs if r.get("SITUAÇÃO") == "Pendente"))
+    k1.metric("NCs carregadas",  len(ncs))
+    k2.metric("REQs carregadas", len(reqs))
+    k3.metric("NCs OK",          sum(1 for nc in ncs if nc.get("SITU") == "OK"))
+    k4.metric("REQs Pendentes",  sum(1 for r  in reqs if r.get("SITUAÇÃO") == "Pendente"))
 
-    st.info(f"🔗 Planilha conectada: `{SHEET_ID_NC[:30]}...`  ·  Sync automático a cada 2 min.")
+    st.info(f"🔗 Planilha: `{SHEET_ID_NC[:30]}...`  ·  Sync automático a cada 2 min.")
+    st.markdown(f'<a href="{LINK_SHEETS}" target="_blank">📊 Abrir planilha no Google Sheets ↗</a>',
+                unsafe_allow_html=True)
 
     if st.button("🔄 Forçar Sincronização", type="primary"):
         with st.spinner("Sincronizando..."):
@@ -634,8 +769,6 @@ def page_importar(ncs, reqs):
 
     st.divider()
     st.subheader("📂 Importar de Arquivo (Excel / CSV)")
-    st.info("ℹ️ Importe NCs ou REQs de uma planilha local. Os dados serão adicionados à planilha oficial.")
-
     tipo_imp = st.radio("O que importar?", ["Notas de Crédito (NCs)", "Requisições (REQs)"], horizontal=True)
     arq = st.file_uploader("Selecione o arquivo", type=["xlsx", "xls", "csv"])
 
@@ -681,18 +814,22 @@ def page_importar(ncs, reqs):
 # ── Relatórios ────────────────────────────────────────────────────────────────
 def page_relatorios(ncs, reqs):
     st.title("📈 Relatórios")
-    tipo = st.selectbox("Tipo", ["Resumo Geral", "NCs Detalhado", "Requisições Detalhado",
-                                  "NCs por Operação", "NCs Próximas do Vencimento (30 dias)", "REQs Pendentes"])
-    _exibir_relatorio(tipo, ncs, reqs)
+
+    c_tipo, c_exp = st.columns([3, 1])
+    with c_tipo:
+        tipo = st.selectbox("Tipo de Relatório", TIPOS_RELATORIO)
+    with c_exp:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        st.download_button(
+            "⬇️ Excel Completo",
+            data=exportar_excel(ncs, reqs),
+            file_name=f"ssac_{datetime.today().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+
     st.divider()
-    st.subheader("📥 Exportar")
-    c1, _ = st.columns([1, 3])
-    with c1:
-        st.download_button("⬇️ Excel Completo",
-                           data=exportar_excel(ncs, reqs),
-                           file_name=f"ssac_{datetime.today().strftime('%Y%m%d_%H%M')}.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           use_container_width=True)
+    _exibir_relatorio(tipo, ncs, reqs)
 
 
 def _exibir_relatorio(tipo, ncs, reqs):
@@ -713,12 +850,19 @@ def _exibir_relatorio(tipo, ncs, reqs):
                           ("Em Tela", fmt(ind["em_tela_total"])),
                           ("REQs Pendentes", fmt(ind["valor_reqs_pendentes"]))]:
                 st.metric(l, v)
+
     elif tipo == "NCs Detalhado":
-        if ncs: st.dataframe(pd.DataFrame(ncs), use_container_width=True, hide_index=True)
+        if ncs:
+            st.dataframe(pd.DataFrame(ncs), use_container_width=True, hide_index=True)
+
     elif tipo == "Requisições Detalhado":
-        if reqs: st.dataframe(pd.DataFrame(reqs), use_container_width=True, hide_index=True)
+        if reqs:
+            st.dataframe(pd.DataFrame(reqs), use_container_width=True, hide_index=True)
+
     elif tipo == "NCs por Operação":
-        if ncs: st.dataframe(ncs_por_operacao(ncs), use_container_width=True, hide_index=True)
+        if ncs:
+            st.dataframe(ncs_por_operacao(ncs), use_container_width=True, hide_index=True)
+
     elif tipo == "NCs Próximas do Vencimento (30 dias)":
         venc = ncs_vencendo(ncs, 30)
         if venc:
@@ -728,6 +872,7 @@ def _exibir_relatorio(tipo, ncs, reqs):
                          use_container_width=True, hide_index=True)
         else:
             st.success("✅ Nenhuma NC vencendo nos próximos 30 dias.")
+
     elif tipo == "REQs Pendentes":
         pend = [r for r in reqs if r.get("SITUAÇÃO") == "Pendente"]
         if pend:
@@ -735,6 +880,57 @@ def _exibir_relatorio(tipo, ncs, reqs):
             st.warning(f"📝 {len(pend)} pendentes — {fmt(sum(parse(r.get('VALOR', 0)) for r in pend))}")
         else:
             st.success("✅ Nenhuma REQ pendente!")
+
+    elif tipo == "Extrato por NC":
+        df = relatorio_extrato_nc(ncs, reqs)
+        if not df.empty:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Sem dados.")
+
+    elif tipo == "REQs por Empresa":
+        df = relatorio_por_empresa(reqs)
+        if not df.empty:
+            t = _t()
+            fig = px.bar(df, x="Empresa", y="Total (R$_num)", color="Qtd REQs",
+                         color_continuous_scale=["#1a4a2e", t["bar_emp"]],
+                         labels={"Total (R$_num)": "Total R$", "Empresa": ""})
+            fig.update_coloraxes(showscale=False)
+            fig.update_layout(height=320, **_cl())
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(df.drop(columns=["Total (R$_num)"], errors="ignore"),
+                         use_container_width=True, hide_index=True)
+        else:
+            st.info("Sem dados.")
+
+    elif tipo == "Saldo por PI":
+        df = relatorio_saldo_pi(ncs)
+        if not df.empty:
+            t = _t()
+            fig = px.bar(df, x="Saldo_num", y="PI", orientation="h",
+                         color="Saldo_num", color_continuous_scale=["#1a4a2e", t["bar_emp"]],
+                         labels={"Saldo_num": "Saldo R$", "PI": ""})
+            fig.update_coloraxes(showscale=False)
+            fig.update_layout(height=max(280, len(df) * 35), **_cl())
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(df.drop(columns=["Saldo_num"], errors="ignore"),
+                         use_container_width=True, hide_index=True)
+        else:
+            st.info("Sem dados.")
+
+    elif tipo == "Saldo por ND":
+        df = relatorio_saldo_nd(ncs)
+        if not df.empty:
+            t = _t()
+            fig = px.pie(df, values="Saldo_num", names="ND", hole=0.5,
+                         color_discrete_sequence=px.colors.sequential.Teal)
+            fig.update_layout(height=320, **{**_cl(), "margin": dict(l=0, r=0, t=20, b=30)})
+            fig.update_traces(textfont_color="#e2e8f0", textinfo="percent+label")
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(df.drop(columns=["Saldo_num"], errors="ignore"),
+                         use_container_width=True, hide_index=True)
+        else:
+            st.info("Sem dados.")
 
 
 # ── Assistente ────────────────────────────────────────────────────────────────
@@ -776,9 +972,13 @@ def page_assistente(ncs, reqs):
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     requer_auth()
-    for k in ("form_nc", "form_req"):
-        if k not in st.session_state: st.session_state[k] = False
-    if "page" not in st.session_state: st.session_state["page"] = "dashboard"
+    _inject_css()
+
+    for k in ("form_nc", "form_req", "tema_claro"):
+        if k not in st.session_state:
+            st.session_state[k] = False
+    if "page" not in st.session_state:
+        st.session_state["page"] = "dashboard"
 
     ncs, reqs, _ = carregar()
     pagina = _sidebar(ncs, reqs)

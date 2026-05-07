@@ -136,6 +136,75 @@ def ncs_vencendo(ncs: list[dict], dias: int = 30) -> list[dict]:
     return sorted(resultado, key=lambda x: x["_DIAS_RESTANTES"])
 
 
+def relatorio_extrato_nc(ncs: list[dict], reqs: list[dict]) -> pd.DataFrame:
+    """Uma linha por NC com suas REQs vinculadas resumidas."""
+    rows = []
+    for nc in ncs:
+        nc_num = nc.get("NC", "")
+        reqs_vinc = [r for r in reqs if r.get("NC") == nc_num]
+        total_reqs = sum(_parse_moeda(r.get("VALOR", 0)) for r in reqs_vinc)
+        rows.append({
+            "NC": nc_num,
+            "Órgão": nc.get("ORGÃO", ""),
+            "Operação": nc.get("OP", ""),
+            "PI": nc.get("PI", ""),
+            "ND": nc.get("ND", ""),
+            "Recebido": _fmt_moeda(_parse_moeda(nc.get("RECEBIDO", 0))),
+            "Saldo NC": _fmt_moeda(_parse_moeda(nc.get("SALDO NC", 0))),
+            "Empenhado": _fmt_moeda(_parse_moeda(nc.get("EMPENHADO", 0))),
+            "REQs": len(reqs_vinc),
+            "Total REQs": _fmt_moeda(total_reqs),
+            "Status": nc.get("SITU", ""),
+            "Prazo": nc.get("PRAZO", ""),
+        })
+    return pd.DataFrame(rows)
+
+
+def relatorio_por_empresa(reqs: list[dict]) -> pd.DataFrame:
+    """Agrupa REQs por empresa com totais e contagem."""
+    if not reqs:
+        return pd.DataFrame()
+    df = pd.DataFrame(reqs)
+    df["_valor"] = df.get("VALOR", pd.Series(dtype=str)).apply(_parse_moeda)
+    result = (df.groupby("EMPRESA")
+                .agg(Qtd_REQs=("_valor", "count"), Total_num=("_valor", "sum"))
+                .reset_index()
+                .sort_values("Total_num", ascending=False))
+    result["Total (R$)"] = result["Total_num"].apply(_fmt_moeda)
+    result = result.rename(columns={"EMPRESA": "Empresa", "Qtd_REQs": "Qtd REQs", "Total_num": "Total (R$_num)"})
+    return result[["Empresa", "Qtd REQs", "Total (R$)", "Total (R$_num)"]]
+
+
+def relatorio_saldo_pi(ncs: list[dict]) -> pd.DataFrame:
+    """Saldo disponível agrupado por PI."""
+    if not ncs:
+        return pd.DataFrame()
+    rows = [{"PI": nc.get("PI") or "Sem PI",
+             "Saldo_num": _parse_moeda(nc.get("SALDO NC", 0)),
+             "Recebido_num": _parse_moeda(nc.get("RECEBIDO", 0))} for nc in ncs]
+    df = (pd.DataFrame(rows).groupby("PI")
+            .agg(Saldo_num=("Saldo_num", "sum"), Recebido_num=("Recebido_num", "sum"))
+            .reset_index().sort_values("Saldo_num", ascending=False))
+    df["Saldo"] = df["Saldo_num"].apply(_fmt_moeda)
+    df["Recebido"] = df["Recebido_num"].apply(_fmt_moeda)
+    return df[["PI", "Recebido", "Saldo", "Saldo_num"]]
+
+
+def relatorio_saldo_nd(ncs: list[dict]) -> pd.DataFrame:
+    """Saldo disponível agrupado por ND."""
+    if not ncs:
+        return pd.DataFrame()
+    rows = [{"ND": nc.get("ND") or "Sem ND",
+             "Saldo_num": _parse_moeda(nc.get("SALDO NC", 0)),
+             "Recebido_num": _parse_moeda(nc.get("RECEBIDO", 0))} for nc in ncs]
+    df = (pd.DataFrame(rows).groupby("ND")
+            .agg(Saldo_num=("Saldo_num", "sum"), Recebido_num=("Recebido_num", "sum"))
+            .reset_index().sort_values("Saldo_num", ascending=False))
+    df["Saldo"] = df["Saldo_num"].apply(_fmt_moeda)
+    df["Recebido"] = df["Recebido_num"].apply(_fmt_moeda)
+    return df[["ND", "Recebido", "Saldo", "Saldo_num"]]
+
+
 def exportar_excel(ncs: list[dict], reqs: list[dict]) -> bytes:
     """Gera planilha Excel com abas NCs, Requisições e Resumo."""
     output = io.BytesIO()
