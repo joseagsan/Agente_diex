@@ -10,7 +10,7 @@ from config import ANTHROPIC_API_KEY, OM_PADRAO, UG_PADRAO
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = f"""Você é DIEX Assistant, assistente especializado em controle financeiro militar da {OM_PADRAO} (UG {UG_PADRAO}).
+_SYSTEM = f"""Você é o assistente do SSAC, especializado em controle financeiro militar da {OM_PADRAO} (UG {UG_PADRAO}).
 
 Suas funções:
 - Responder consultas sobre saldos de NCs, status de requisições e prazos

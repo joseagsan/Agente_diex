@@ -69,7 +69,7 @@ def _pagina_login():
         <div class="login-wrap">
             <div class="login-title">
                 <div class="icon">🪖</div>
-                <h1>Agente DIEX</h1>
+                <h1>SSAC</h1>
                 <p>{OM_PADRAO} &nbsp;·&nbsp; UG {UG_PADRAO}</p>
             </div>
         </div>
