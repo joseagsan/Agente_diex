@@ -1013,6 +1013,40 @@ def page_gerar_req(reqs, ncs):
             v = nc_d.get(nc_campo, "")
         return v or default
 
+    # ── Seletores de frases padrão (fora do form para reatividade)
+    _FRASES_INTRO = [
+        "— escrever manualmente —",
+        "Solicito a V.Sa. autorização para realizar as aquisições abaixo especificadas, em conformidade com a legislação vigente e recursos disponíveis.",
+        "Encaminho à consideração de V.Sa. a presente requisição de material, com vistas ao atendimento das necessidades desta OM.",
+        "Solicito providências para a aquisição dos materiais discriminados, necessários ao cumprimento da missão desta organização.",
+        "Solicito a V.Sa. a emissão de Nota de Empenho para aquisição dos materiais/serviços abaixo relacionados, em conformidade com os recursos creditados.",
+    ]
+    _FRASES_JUST = [
+        "— escrever manualmente —",
+        "A aquisição dos itens constantes nesta requisição justifica-se pela necessidade de manutenção das atividades operacionais desta OM.",
+        "Os materiais solicitados são essenciais para o cumprimento da missão atribuída a esta organização militar, conforme planejamento operacional vigente.",
+        "A presente requisição atende às necessidades administrativas e operacionais desta OM, visando garantir a continuidade das atividades rotineiras.",
+        "A aquisição é necessária para a execução da operação/missão em curso, não havendo material disponível em estoque para suprir a demanda.",
+        "O material/serviço solicitado é indispensável para manutenção das condições operacionais mínimas desta OM, não podendo ser postergada sua aquisição.",
+    ]
+
+    if "intro_txt" not in st.session_state:  st.session_state.intro_txt = ""
+    if "just_txt"  not in st.session_state:  st.session_state.just_txt  = ""
+
+    col_i, col_j = st.columns(2)
+    with col_i:
+        sel_intro = st.selectbox("📝 Frase padrão — Introdução", _FRASES_INTRO, key="sel_intro_frase")
+        if sel_intro != "— escrever manualmente —":
+            st.session_state["_intro_txt"] = sel_intro
+        elif "_intro_txt" not in st.session_state:
+            st.session_state["_intro_txt"] = ""
+    with col_j:
+        sel_just = st.selectbox("📝 Frase padrão — Justificativa", _FRASES_JUST, key="sel_just_frase")
+        if sel_just != "— escrever manualmente —":
+            st.session_state["_just_txt"] = sel_just
+        elif "_just_txt" not in st.session_state:
+            st.session_state["_just_txt"] = ""
+
     # ── Form com campos
     with st.form("f_campos_req"):
         c1, c2, c3 = st.columns(3)
@@ -1035,18 +1069,31 @@ def page_gerar_req(reqs, ncs):
         fornecedor = c10.text_input("Fornecedor (Razão Social)", value=_v("EMPRESA"))
         cnpj       = c11.text_input("CNPJ",                     value="")
 
-        assunto      = st.text_input("Assunto",         value=_v("FINALIDADE", "FINALIDADE"))
-        vigencia_ata = st.text_input("Vigência da ATA", value=nc_d.get("PRAZO", ""))
+        assunto      = st.text_input("Assunto", value=_v("FINALIDADE", "FINALIDADE"))
+
+        cm1, cm2, cm3, cm4 = st.columns([2, 2, 1, 2])
+        tipo_modal   = cm1.selectbox("Modalidade", ["PREGÃO", "CARONA", "DISPENSA", "INEXIGIBILIDADE", "SUPRIMENTO DE FUNDOS"])
+        num_pregao   = cm2.text_input("Nº Pregão/ARP", placeholder="90005/2026")
+        ug_modal     = cm3.text_input("UG", value=nc_d.get("UG", UG_PADRAO), key="ug_modal")
+        vigencia_ata = cm4.text_input("Vigência da ATA", value=nc_d.get("PRAZO", ""))
+        modalidade   = f"{tipo_modal} - {num_pregao} {ug_modal}".strip(" -")
+        intro        = st.text_area("Introdução (INTRO_1)", value=st.session_state.get("_intro_txt", ""))
+        justificativa = st.text_area("Justificativa",        value=st.session_state.get("_just_txt", ""))
         finalidade   = st.text_area("Finalidade / Objeto", value=_v("FINALIDADE", "FINALIDADE"))
 
         salvar = st.form_submit_button("✅ Confirmar Dados", type="primary", use_container_width=True)
 
     if salvar:
+        _MESES = {1:"janeiro",2:"fevereiro",3:"março",4:"abril",5:"maio",6:"junho",
+                  7:"julho",8:"agosto",9:"setembro",10:"outubro",11:"novembro",12:"dezembro"}
+        local_data = f"Boa Vista/RR, {data_req.day} de {_MESES[data_req.month]} de {data_req.year}"
+        dados_nc   = f"{nc_sel} de {nc_d.get('DATA NC','')}" if nc_sel else ""
+
         st.session_state.campos_req = {
             "requisition_id":  req_id,
-            "DATA":            data_req.strftime("%d/%m/%Y"),
+            "LOCAL_DATA":      local_data,
+            "DADOS_NC":        dados_nc,
             "NE":              ne,
-            "NC":              nc_sel,
             "PI":              pi,
             "ND":              nd,
             "PTRES":           ptres,
@@ -1056,10 +1103,11 @@ def page_gerar_req(reqs, ncs):
             "UG":              ug,
             "OM":              om,
             "ASSUNTO":         assunto,
-            "VIGENCIA_ATA":    vigencia_ata,
+            "MODALIDADE":      modalidade,
+            "INTRO_1":         intro,
+            "JUSTIFICATIVA":   justificativa,
+            "VIGENCIA_DA_ATA": vigencia_ata,
             "FINALIDADE":      finalidade,
-            "ORGAO":           nc_d.get("ORGÃO", ""),
-            "PTRES":           ptres,
         }
         st.success("✅ Dados confirmados. Adicione os itens abaixo.")
 
@@ -1074,29 +1122,33 @@ def page_gerar_req(reqs, ncs):
     st.subheader("2. Itens da Requisição")
 
     with st.form("f_add_item", clear_on_submit=True):
-        ci1, ci2, ci3, ci4 = st.columns([4, 1, 1, 2])
-        desc  = ci1.text_input("Descrição do Item *")
-        und   = ci2.text_input("Unid.", value="UN")
-        qtd   = ci3.number_input("Qtd", min_value=0.001, value=1.0, step=1.0, format="%.3f")
-        vunit = ci4.number_input("Valor Unit. (R$)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-        si    = st.text_input("SI (catálogo, opcional)")
+        ci1, ci2 = st.columns([1, 4])
+        si    = ci1.text_input("Nº Item (pregão) *", placeholder="ex: 42")
+        desc  = ci2.text_input("Descrição do Item *")
+        ci3, ci4, ci5 = st.columns([1, 1, 2])
+        und   = ci3.text_input("Unid.", value="UN")
+        qtd   = ci4.number_input("Qtd", min_value=0.001, value=1.0, step=1.0, format="%.3f")
+        vunit = ci5.number_input("Valor Unit. (R$)", min_value=0.0, value=0.0, step=0.01, format="%.2f")
         add   = st.form_submit_button("➕ Adicionar Item", use_container_width=True)
 
     if add:
-        if desc and vunit > 0:
+        if si and desc and vunit > 0:
             total   = round(qtd * vunit, 2)
             ord_num = len(st.session_state.req_itens) + 1
             st.session_state.req_itens.append({
-                "ORD": str(ord_num), "ITEM": str(ord_num), "SI": si,
-                "DESCRICAO_ITEM": desc, "UND": und,
-                "QTD":        str(qtd).replace(".", ","),
-                "VALOR_UNIT": fmt(vunit),
-                "VALOR_TOTAL": fmt(total),
-                "_total":     total,
+                "ORD":           str(ord_num),
+                "ITEM":          si,
+                "SI":            si,
+                "DESCRICAO_ITEM": desc,
+                "UND":           und,
+                "QTD":           str(qtd).replace(".", ","),
+                "VALOR_UNIT":    fmt(vunit),
+                "VALOR_TOTAL":   fmt(total),
+                "_total":        total,
             })
             st.rerun()
         else:
-            st.warning("Preencha a descrição e o valor unitário.")
+            st.warning("Preencha o Nº do item (pregão), a descrição e o valor unitário.")
 
     if st.session_state.req_itens:
         df_it = pd.DataFrame(st.session_state.req_itens)
