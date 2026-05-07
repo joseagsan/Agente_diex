@@ -44,12 +44,12 @@ def kpis(ncs: list[dict], reqs: list[dict]) -> dict:
 
     vencendo_7d = sum(
         1 for nc in ncs
-        if nc.get("SITU") == "OK" and _dias(nc.get("PRAZO", "")) is not None
+        if nc.get("SITU") == "EM TELA" and _dias(nc.get("PRAZO", "")) is not None
         and 0 <= _dias(nc.get("PRAZO", "")) <= 7
     )
     vencidas = sum(
         1 for nc in ncs
-        if nc.get("SITU") == "OK" and _dias(nc.get("PRAZO", "")) is not None
+        if nc.get("SITU") == "EM TELA" and _dias(nc.get("PRAZO", "")) is not None
         and _dias(nc.get("PRAZO", "")) < 0
     )
 
@@ -126,6 +126,8 @@ def ncs_vencendo(ncs: list[dict], dias: int = 30) -> list[dict]:
     hoje = date.today()
     resultado = []
     for nc in ncs:
+        if nc.get("SITU") != "EM TELA":
+            continue
         d = _parse_data(nc.get("PRAZO", ""))
         if d:
             restantes = (d - hoje).days

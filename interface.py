@@ -370,6 +370,8 @@ def page_ncs(ncs):
         if f_nd    and nc.get("ND")    not in f_nd:    continue
         if f_pi    and nc.get("PI")    not in f_pi:    continue
         if f_prazo != "Todos":
+            if nc.get("SITU") != "EM TELA":
+                continue
             try:
                 dias = (datetime.strptime(nc.get("PRAZO", ""), "%d/%m/%Y").date() - hoje).days
                 if f_prazo == "Vencidas"           and dias >= 0:          continue
