@@ -59,9 +59,7 @@ def _inject_css():
     t = _t()
     st.markdown(f"""
 <style>
-#MainMenu, footer {{visibility:hidden;}}
-header {{visibility:hidden;}}
-[data-testid="collapsedControl"] {{visibility:visible !important; display:flex !important;}}
+#MainMenu, footer, header {{visibility:hidden;}}
 .block-container {{padding:1.5rem 2rem 3rem !important; max-width:100% !important;}}
 
 section[data-testid="stSidebar"] {{width:230px !important; min-width:230px !important;}}
@@ -103,7 +101,43 @@ hr {{border-color:{t['card_border']} !important;}}
 .kpi-card .kpi-value {{font-size:1.45rem; font-weight:800; color:{t['text']};}}
 .kpi-card .kpi-delta {{font-size:.75rem; color:{t['subtext']}; margin-top:4px;}}
 .kpi-card .kpi-stripe {{position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:12px 0 0 12px;}}
+
+/* Botão flutuante de toggle da sidebar */
+#ssac-menu-btn {{
+    position:fixed; top:10px; left:10px; z-index:99999;
+    background:#1a2540; border:1px solid #2a3a5c; border-radius:8px;
+    color:#94a3b8; font-size:18px; width:36px; height:36px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; transition:background .2s;
+}}
+#ssac-menu-btn:hover {{ background:#0f1f35; color:#c8d8e8; }}
 </style>
+<script>
+(function() {{
+    function addBtn() {{
+        if (document.getElementById('ssac-menu-btn')) return;
+        var btn = document.createElement('button');
+        btn.id = 'ssac-menu-btn';
+        btn.innerHTML = '&#9776;';
+        btn.title = 'Abrir/Fechar menu';
+        btn.onclick = function() {{
+            var toggle = window.parent.document.querySelector('[data-testid="collapsedControl"]')
+                      || window.parent.document.querySelector('button[aria-label="Close sidebar"]')
+                      || window.parent.document.querySelector('button[aria-label="Open sidebar"]');
+            if (toggle) {{ toggle.click(); return; }}
+            // fallback: clica no header button
+            var hbtns = window.parent.document.querySelectorAll('header button');
+            if (hbtns.length) hbtns[0].click();
+        }};
+        document.body.appendChild(btn);
+    }}
+    if (document.readyState === 'complete') addBtn();
+    else window.addEventListener('load', addBtn);
+    // Garante após reruns do Streamlit
+    setTimeout(addBtn, 500);
+    setTimeout(addBtn, 1500);
+}})();
+</script>
 """, unsafe_allow_html=True)
 
 
