@@ -15,22 +15,51 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-BASE          = "https://contratos.sistema.gov.br"
-SESSION_FILE  = os.path.join(os.path.dirname(__file__),
-                             "..", "agente-licitacoes", "session.json")
+BASE = "https://contratos.sistema.gov.br"
+
+# Procura session.json em locais possíveis (local e Streamlit Cloud)
+def _session_file() -> str:
+    candidatos = [
+        os.path.join(os.path.dirname(__file__), "session.json"),
+        os.path.join(os.path.dirname(__file__), "..", "agente-licitacoes", "session.json"),
+        "session.json",
+    ]
+    for c in candidatos:
+        if os.path.exists(c):
+            return c
+    return candidatos[0]  # retorna o primeiro mesmo que não exista (erro mais claro)
+
+SESSION_FILE = _session_file()
 
 
 # ── Sessão autenticada ─────────────────────────────────────────────────────────
 
-def _sessao() -> requests.Session:
+def _carregar_cookies() -> list:
+    """Carrega cookies do session.json (arquivo ou Streamlit secrets)."""
     import json
-    s = requests.Session()
-    s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0"})
+
+    # 1. Tenta arquivo local
     if os.path.exists(SESSION_FILE):
         with open(SESSION_FILE) as f:
-            data = json.load(f)
-        for c in data.get("cookies", []):
-            s.cookies.set(c["name"], c["value"], domain=c.get("domain", ""))
+            return json.load(f).get("cookies", [])
+
+    # 2. Tenta Streamlit secrets
+    try:
+        import streamlit as st
+        raw = st.secrets.get("session_json", "")
+        if raw:
+            return json.loads(raw).get("cookies", [])
+    except Exception:
+        pass
+
+    return []
+
+
+def _sessao() -> requests.Session:
+    s = requests.Session()
+    s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0"})
+    for c in _carregar_cookies():
+        s.cookies.set(c["name"], c["value"], domain=c.get("domain", ""))
     return s
 
 
