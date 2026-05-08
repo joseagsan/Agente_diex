@@ -1,59 +1,34 @@
 """
 Pesquisa de itens de pregão no portal comprasnet.gov.br.
-Usa requests para buscar o HTML público da ATA e Claude API para extrair os dados,
-seguindo o mesmo padrão do extrator_pdf.py.
+Usa requests + BeautifulSoup para extrair os dados sem depender de Claude API.
 """
-import json
 import logging
 import re
 
 import requests
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
-# comprasnet usa latin-1 e às vezes tem SSL velho
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
     "Accept-Language": "pt-BR,pt;q=0.9",
 }
 
-_PROMPT_ITENS = """Analise esta página do portal comprasnet.gov.br que contém os itens de um pregão/ATA
-de Registro de Preços. Extraia TODOS os itens e retorne SOMENTE um JSON válido com a estrutura abaixo.
-Não inclua texto fora do JSON.
-
-{
-  "vigencia_inicio": "DD/MM/YYYY",
-  "vigencia_fim": "DD/MM/YYYY",
-  "itens": [
-    {
-      "numero_item": "1",
-      "descricao": "descrição completa do item",
-      "und": "UN",
-      "valor_unitario": 0.00,
-      "fornecedor": "Razão Social do fornecedor",
-      "cnpj": "00.000.000/0000-00"
-    }
-  ]
-}
-
-Use "" para campos não encontrados e 0.0 para valores não encontrados.
-Formate CNPJ como XX.XXX.XXX/XXXX-XX.
-"""
-
 
 def _normalizar_pregao(num: str) -> str:
     """
-    Normaliza o número do pregão para o formato do comprasnet: AAAANNNNN
-    Aceita: "90005", "90005/2024", "2024/90005", "PE 90005/2024", etc.
+    Normaliza o número do pregão para o formato comprasnet: AAAANNNNN
+    Aceita: "90005", "90005/2024", "2024/90005", "PE 90005/2024", "52024", etc.
     """
     import datetime
     ano_atual = str(datetime.date.today().year)
 
-    # Remove letras e espaços do início ("PE ", "SRP ", etc.)
     num = re.sub(r"^[A-Za-z\s]+", "", num).strip()
 
-    # Extrai ano e sequencial
     m = re.search(r"(\d{4})[/\-](\d+)", num)
     if m:
         ano, seq = m.group(1), m.group(2)
@@ -68,124 +43,158 @@ def _normalizar_pregao(num: str) -> str:
     return ano + seq.zfill(5)
 
 
-def _html_para_texto(html_bytes: bytes) -> str:
-    """Converte HTML em texto limpo para enviar ao Claude."""
-    try:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html_bytes, "lxml")
-        for tag in soup(["script", "style", "head"]):
-            tag.decompose()
-        texto = soup.get_text(separator="\n", strip=True)
-        texto = re.sub(r"\n{3,}", "\n\n", texto)
-        return texto[:15000]
-    except ImportError:
-        texto = re.sub(r"<[^>]+>", " ", html_bytes.decode("latin-1", errors="replace"))
-        return re.sub(r"\s{2,}", " ", texto)[:15000]
-
-
-def _extrair_com_claude(texto: str) -> dict:
-    """Envia o texto ao Claude API e extrai JSON de itens (padrão extrator_pdf.py)."""
-    from config import ANTHROPIC_API_KEY
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=4000,
-        messages=[{
-            "role": "user",
-            "content": f"{_PROMPT_ITENS}\n\n---\nCONTEÚDO DA PÁGINA:\n{texto}",
-        }],
-    )
-    raw = resp.content[0].text.strip()
-    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw = re.sub(r"\s*```$", "", raw)
-    return json.loads(raw.strip())
-
-
 def _fmt(v: float) -> str:
     return "R$ " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-# ── URLs do comprasnet ─────────────────────────────────────────────────────────
+def _parse_br(texto: str) -> float:
+    t = re.sub(r"[R$\s\xa0]", "", str(texto))
+    if not t:
+        return 0.0
+    if "," in t:
+        t = t.replace(".", "").replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return 0.0
 
-def _urls_pregao(uasg: str, num_normalizado: str) -> list[str]:
-    """Retorna lista de URLs a tentar para a ATA do pregão."""
+
+def _urls_pregao(uasg: str, num_norm: str) -> list[tuple[str, str]]:
+    """Retorna lista de (label, url) a tentar."""
     return [
-        # ATA pública (mais completa — fornecedor + preço + vigência)
-        f"https://www.comprasnet.gov.br/livre/pregao/ata0.asp"
-        f"?co_no_uasg={uasg}&numprp={num_normalizado}",
-        # Resultado por fornecedor (fallback)
-        f"https://www.comprasnet.gov.br/livre/pregao/result_multif0.asp"
-        f"?co_no_uasg={uasg}&numprp={num_normalizado}",
+        ("ATA (ata0.asp)",
+         f"https://www.comprasnet.gov.br/livre/pregao/ata0.asp"
+         f"?co_no_uasg={uasg}&numprp={num_norm}"),
+        ("Resultado multifornecedor (result_multif0.asp)",
+         f"https://www.comprasnet.gov.br/livre/pregao/result_multif0.asp"
+         f"?co_no_uasg={uasg}&numprp={num_norm}"),
     ]
 
 
-# ── API pública ────────────────────────────────────────────────────────────────
+def _extrair_tabela(html_bytes: bytes) -> list[dict]:
+    """
+    Tenta extrair itens do HTML do comprasnet usando BeautifulSoup.
+    Suporta a estrutura de tabela da página ata0.asp.
+    """
+    from bs4 import BeautifulSoup
 
-def buscar_itens_pregao(uasg: str, num_pregao: str) -> list[dict]:
+    soup = BeautifulSoup(html_bytes, "lxml")
+
+    # Vigência — aparece em texto como "Vigência: DD/MM/YYYY a DD/MM/YYYY"
+    vig_inicio = vig_fim = ""
+    texto_pagina = soup.get_text()
+    m = re.search(r"vig[eê]ncia[:\s]+(\d{2}/\d{2}/\d{4})[^0-9]*(\d{2}/\d{2}/\d{4})",
+                  texto_pagina, re.IGNORECASE)
+    if m:
+        vig_inicio, vig_fim = m.group(1), m.group(2)
+
+    # CNPJ do fornecedor — primeiro que aparecer no texto
+    cnpj_global = ""
+    m = re.search(r"(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})", texto_pagina)
+    if m:
+        cnpj_global = m.group(1)
+
+    # Procura tabelas com colunas de item
+    itens: list[dict] = []
+    for tabela in soup.find_all("table"):
+        headers = [th.get_text(strip=True).lower() for th in tabela.find_all("th")]
+        if not headers:
+            # Tenta primeira linha como cabeçalho
+            primeira = tabela.find("tr")
+            if primeira:
+                headers = [td.get_text(strip=True).lower()
+                           for td in primeira.find_all(["td", "th"])]
+
+        # Identifica colunas relevantes
+        col_map = {}
+        for i, h in enumerate(headers):
+            if re.search(r"\bitem\b|\bnr\b|\bn[oº]\b", h):
+                col_map.setdefault("numero_item", i)
+            elif re.search(r"descri[cç]", h):
+                col_map.setdefault("descricao", i)
+            elif re.search(r"unid|und\b", h):
+                col_map.setdefault("und", i)
+            elif re.search(r"unit[aá]rio|unit\b|valor\s*unit", h):
+                col_map.setdefault("valor_unitario", i)
+            elif re.search(r"fornecedor|empresa|razão social", h):
+                col_map.setdefault("fornecedor", i)
+            elif re.search(r"cnpj", h):
+                col_map.setdefault("cnpj", i)
+
+        if "descricao" not in col_map:
+            continue
+
+        linhas = tabela.find_all("tr")[1:]
+        for linha in linhas:
+            cels = linha.find_all("td")
+            if len(cels) < 2:
+                continue
+
+            def _cel(key):
+                idx = col_map.get(key)
+                if idx is None or idx >= len(cels):
+                    return ""
+                return cels[idx].get_text(strip=True)
+
+            desc = _cel("descricao")
+            if not desc:
+                continue
+
+            v = _parse_br(_cel("valor_unitario"))
+            cnpj = _cel("cnpj") or cnpj_global
+
+            itens.append({
+                "numero_item":     _cel("numero_item"),
+                "descricao":       desc,
+                "und":             _cel("und") or "UN",
+                "valor_unit_num":  v,
+                "valor_unit":      _fmt(v),
+                "fornecedor":      _cel("fornecedor"),
+                "cnpj":            cnpj,
+                "vigencia_inicio": vig_inicio,
+                "vigencia_fim":    vig_fim,
+            })
+
+    return itens
+
+
+def buscar_itens_pregao(uasg: str, num_pregao: str) -> tuple[list[dict], str]:
     """
     Busca itens de um pregão no comprasnet.gov.br.
 
-    Args:
-        uasg: código UASG (ex: "160482")
-        num_pregao: número do pregão (ex: "90005/2024", "90005", "PE 90005/2024")
-
     Returns:
-        Lista de dicts com: numero_item, descricao, und,
-        valor_unit_num, valor_unit, fornecedor, cnpj,
-        vigencia_inicio, vigencia_fim
+        (lista_de_itens, url_acessada)
     """
     num_norm = _normalizar_pregao(num_pregao)
-    logger.info("Buscando pregão %s (normalizado: %s) UASG %s", num_pregao, num_norm, uasg)
+    logger.info("Buscando pregão %s → %s | UASG %s", num_pregao, num_norm, uasg)
 
-    html_bytes = None
-    url_usada = ""
+    tentativas = _urls_pregao(uasg, num_norm)
+    ultimo_erro = ""
 
-    for url in _urls_pregao(uasg, num_norm):
+    for label, url in tentativas:
         try:
+            logger.info("Tentando %s: %s", label, url)
             resp = requests.get(url, headers=_HEADERS, timeout=30, verify=False)
-            # comprasnet retorna 200 mesmo para "não encontrado" — verifica conteúdo
-            if resp.status_code == 200 and len(resp.content) > 2000:
-                html_bytes = resp.content
-                url_usada = url
-                logger.info("HTML obtido de: %s (%d bytes)", url, len(html_bytes))
-                break
+            if resp.status_code != 200:
+                ultimo_erro = f"HTTP {resp.status_code} em {url}"
+                continue
+            if len(resp.content) < 2000:
+                ultimo_erro = f"Página muito curta ({len(resp.content)}B) — pregão não encontrado: {url}"
+                continue
+
+            itens = _extrair_tabela(resp.content)
+            if itens:
+                logger.info("%d itens extraídos de %s", len(itens), url)
+                return itens, url
+
+            ultimo_erro = f"HTML obtido mas nenhuma tabela de itens reconhecida: {url}"
+
         except Exception as e:
-            logger.warning("Falha em %s: %s", url, e)
+            ultimo_erro = f"Erro em {url}: {e}"
+            logger.warning(ultimo_erro)
 
-    if not html_bytes:
-        raise ValueError(
-            f"Pregão {num_pregao} não encontrado para UASG {uasg}. "
-            f"Verifique o número e o formato (ex: 90005/2024)."
-        )
-
-    texto = _html_para_texto(html_bytes)
-
-    try:
-        dados = _extrair_com_claude(texto)
-    except Exception as e:
-        raise RuntimeError(f"Erro ao extrair dados com Claude: {e}") from e
-
-    itens_brutos = dados.get("itens", [])
-    vig_inicio = dados.get("vigencia_inicio", "")
-    vig_fim = dados.get("vigencia_fim", "")
-
-    resultados = []
-    for it in itens_brutos:
-        v = float(it.get("valor_unitario") or 0)
-        resultados.append({
-            "numero_item":     str(it.get("numero_item", "")),
-            "descricao":       str(it.get("descricao", "")),
-            "und":             str(it.get("und", "UN")),
-            "valor_unit_num":  v,
-            "valor_unit":      _fmt(v),
-            "fornecedor":      str(it.get("fornecedor", "")),
-            "cnpj":            str(it.get("cnpj", "")),
-            "vigencia_inicio": vig_inicio,
-            "vigencia_fim":    vig_fim,
-            "_url":            url_usada,
-        })
-
-    logger.info("%d itens extraídos.", len(resultados))
-    return resultados
+    raise ValueError(
+        f"Não foi possível obter os itens.\n"
+        f"UASG: {uasg} | Pregão normalizado: {num_norm}\n"
+        f"Último erro: {ultimo_erro}"
+    )

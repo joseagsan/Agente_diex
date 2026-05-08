@@ -1177,18 +1177,26 @@ def page_gerar_req(reqs, ncs):
         else:
             with st.spinner("🌐 Buscando em comprasnet.gov.br..."):
                 try:
-                    from pesquisa_compras import buscar_itens_pregao
-                    resultados = buscar_itens_pregao(p_uasg, p_pregao)
-                    st.session_state["pesq_resultados"] = resultados
-                    if not resultados:
+                    from pesquisa_compras import buscar_itens_pregao, _normalizar_pregao
+                    num_norm = _normalizar_pregao(p_pregao)
+                    st.caption(f"🔗 Buscando: UASG `{p_uasg}` | Pregão normalizado: `{num_norm}` | "
+                               f"URL: `comprasnet.gov.br/livre/pregao/ata0.asp?"
+                               f"co_no_uasg={p_uasg}&numprp={num_norm}`")
+                    itens, url_usada = buscar_itens_pregao(p_uasg, p_pregao)
+                    st.session_state["pesq_resultados"] = itens
+                    st.session_state["pesq_url"] = url_usada
+                    if not itens:
                         st.info("Nenhum item encontrado. Verifique UASG e número do pregão.")
                 except Exception as e:
-                    st.error(f"Erro na pesquisa: {e}")
+                    st.error(str(e))
 
         # Exibe resultados
         resultados_pesq = st.session_state.get("pesq_resultados", [])
         if resultados_pesq:
+            url_exib = st.session_state.get("pesq_url", "")
             st.success(f"✅ {len(resultados_pesq)} item(ns) encontrado(s).")
+            if url_exib:
+                st.caption(f"🔗 Fonte: `{url_exib}`")
             for i, res in enumerate(resultados_pesq):
                 with st.expander(
                     f"**{i+1}.** {res['descricao'][:70]} | {res['valor_unit']} | {res['fornecedor'][:40]}",
