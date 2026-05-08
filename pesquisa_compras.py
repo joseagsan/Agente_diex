@@ -1,6 +1,6 @@
 """
 Pesquisa de itens de ARP no portal contratos.sistema.gov.br para preenchimento de REQ.
-Adaptado do crawler do agente-licitacoes.
+Seletores validados pelo agente-licitacoes/crawler.py.
 """
 import logging
 import os
@@ -9,8 +9,9 @@ import re
 logger = logging.getLogger(__name__)
 
 SESSION_FILE = "session.json"
+BASE_URL = "https://contratos.sistema.gov.br/transparencia/arp-item"
 
-# Índices das colunas na tabela de resultados do portal
+# Índices das colunas na tabela #itens
 COL_NUMERO_ATA  = 0
 COL_UNIDADE     = 1
 COL_NUMERO_ITEM = 2
@@ -34,9 +35,8 @@ def playwright_disponivel() -> bool:
 
 
 def _caminho_chromium_sistema() -> str | None:
-    """Retorna o path do Chromium instalado via apt, se existir."""
     import shutil
-    for nome in ("chromium", "chromium-browser", "chromium-bsu"):
+    for nome in ("chromium", "chromium-browser"):
         path = shutil.which(nome)
         if path:
             return path
@@ -51,12 +51,11 @@ def garantir_navegador() -> None:
     import subprocess
     import sys
 
-    # Testa com chromium do sistema (Streamlit Cloud via packages.txt)
     try:
         from playwright.sync_api import sync_playwright
         exe = _caminho_chromium_sistema()
         with sync_playwright() as p:
-            kwargs = {"headless": True}
+            kwargs: dict = {"headless": True}
             if exe:
                 kwargs["executable_path"] = exe
             b = p.chromium.launch(**kwargs)
@@ -65,7 +64,6 @@ def garantir_navegador() -> None:
     except Exception:
         pass
 
-    # Tenta baixar o chromium do playwright
     logger.info("Instalando Chromium via playwright install...")
     for cmd in [
         [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
@@ -74,14 +72,12 @@ def garantir_navegador() -> None:
         try:
             r = subprocess.run(cmd, capture_output=True, timeout=300)
             if r.returncode == 0:
-                logger.info("Chromium instalado com sucesso.")
+                logger.info("Chromium instalado.")
                 return
         except Exception:
             continue
 
-    raise RuntimeError(
-        "Chromium não encontrado. Execute: playwright install chromium"
-    )
+    raise RuntimeError("Chromium não encontrado. Execute: playwright install chromium")
 
 
 def _parse_br(texto: str) -> float:
@@ -101,14 +97,14 @@ def _fmt(v: float) -> str:
 
 
 def _extrair_detalhe(context, link: str) -> dict:
-    """Abre a página de detalhe do item e extrai valor unitário, UND, fornecedor e CNPJ."""
+    """Abre a página de detalhe e extrai valor unitário, UND, fornecedor e CNPJ."""
     page = context.new_page()
     dados = {"valor_unitario": 0.0, "und": "", "fornecedor": "", "cnpj": ""}
     try:
         page.goto(link, wait_until="networkidle", timeout=20000)
         content = page.content()
 
-        # ── Valor unitário
+        # Valor unitário
         try:
             tabela = page.locator("table:has(th:has-text('Valor unitário'))")
             if tabela.count() > 0:
@@ -118,41 +114,42 @@ def _extrair_detalhe(context, link: str) -> dict:
         except Exception:
             pass
 
-        # ── Unidade de medida
+        # Unidade de medida
         try:
-            tabela = page.locator("table:has(th:has-text('Unidade'))")
+            tabela = page.locator("table:has(th:has-text('Unidade de fornecimento'))")
+            if tabela.count() == 0:
+                tabela = page.locator("table:has(th:has-text('Unidade'))")
             if tabela.count() > 0:
-                td = tabela.first.locator("tbody tr:first-child td:nth-child(2)")
+                td = tabela.first.locator("tbody tr:first-child td").nth(1)
                 if td.count() > 0:
-                    dados["und"] = td.first.inner_text().strip()
+                    dados["und"] = td.inner_text().strip()
         except Exception:
             pass
 
-        # ── CNPJ
+        # CNPJ
         m = re.search(r"(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})", content)
         if m:
             dados["cnpj"] = m.group(1)
 
-        # ── Nome do fornecedor
-        for pattern in [
-            r"Fornecedor[^:]*?:\s*([^\n<]{5,100})",
-            r"Razão Social[^:]*?:\s*([^\n<]{5,100})",
-        ]:
-            m = re.search(pattern, content, re.IGNORECASE)
-            if m:
-                dados["fornecedor"] = m.group(1).strip()
-                break
+        # Fornecedor — tenta tabela primeiro
+        try:
+            tabela = page.locator("table:has(th:has-text('Fornecedor'))")
+            if tabela.count() > 0:
+                td = tabela.first.locator("tbody tr:first-child td").nth(1)
+                if td.count() > 0:
+                    dados["fornecedor"] = td.inner_text().strip()
+        except Exception:
+            pass
 
-        # Fallback: tabela de fornecedor
         if not dados["fornecedor"]:
-            try:
-                tabela = page.locator("table:has(th:has-text('Fornecedor'))")
-                if tabela.count() > 0:
-                    td = tabela.first.locator("tbody tr:first-child td:nth-child(2)")
-                    if td.count() > 0:
-                        dados["fornecedor"] = td.first.inner_text().strip()
-            except Exception:
-                pass
+            for pattern in [
+                r"Fornecedor[^:]*?:\s*([^\n<]{5,100})",
+                r"Razão Social[^:]*?:\s*([^\n<]{5,100})",
+            ]:
+                m = re.search(pattern, content, re.IGNORECASE)
+                if m:
+                    dados["fornecedor"] = m.group(1).strip()
+                    break
 
         return dados
     except Exception as e:
@@ -162,13 +159,13 @@ def _extrair_detalhe(context, link: str) -> dict:
         page.close()
 
 
-def buscar_itens_arp(ug: str, descricao: str, max_resultados: int = 10) -> list[dict]:
+def buscar_itens_arp(uasg: str, pregao: str, max_resultados: int = 10) -> list[dict]:
     """
     Busca itens de ARP no portal contratos.sistema.gov.br.
 
     Args:
-        ug: código UASG/UG (ex: "160482")
-        descricao: descrição do item ou número do pregão para busca
+        uasg: código UASG (ex: "160482")
+        pregao: número do pregão ou termo de busca (ex: "90005/2024")
         max_resultados: máximo de itens retornados
 
     Returns:
@@ -176,57 +173,66 @@ def buscar_itens_arp(ug: str, descricao: str, max_resultados: int = 10) -> list[
         valor_unit, valor_unit_num, fornecedor, cnpj,
         vigencia_inicio, vigencia_fim
     """
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import sync_playwright, TimeoutError as PTimeout
 
     resultados = []
+    exe = _caminho_chromium_sistema()
 
     with sync_playwright() as p:
-        exe = _caminho_chromium_sistema()
-        launch_kwargs: dict = {"headless": True}
+        launch_kw: dict = {"headless": True}
         if exe:
-            launch_kwargs["executable_path"] = exe
+            launch_kw["executable_path"] = exe
         try:
-            browser = p.chromium.launch(**launch_kwargs)
+            browser = p.chromium.launch(**launch_kw)
         except Exception:
             browser = p.chromium.launch(headless=True)
 
-        ctx_kwargs = {}
+        ctx_kw: dict = {}
         if os.path.exists(SESSION_FILE):
-            ctx_kwargs["storage_state"] = SESSION_FILE
+            ctx_kw["storage_state"] = SESSION_FILE
 
-        ctx = browser.new_context(**ctx_kwargs)
+        ctx = browser.new_context(**ctx_kw)
         page = ctx.new_page()
 
         try:
-            page.goto(
-                "https://contratos.sistema.gov.br/transparencia/arp-item",
-                wait_until="networkidle", timeout=30000,
-            )
+            page.goto(BASE_URL, wait_until="networkidle", timeout=30000)
 
-            # Abre filtros avançados
+            # ── 1. Garante status Vigente ──────────────────────────────────
             try:
-                campo_uf = page.locator("[name='uf']")
-                if not campo_uf.is_visible():
-                    botao = page.locator("button:has-text('Filtros'), a:has-text('Filtros')")
-                    if botao.count() > 0:
-                        botao.first.click()
-                        campo_uf.wait_for(state="visible", timeout=3000)
+                page.check("#vigente", timeout=3000)
             except Exception:
                 pass
 
-            # Seleciona UG
-            if ug:
+            # ── 2. Preenche Palavra-chave (pregão) ────────────────────────
+            campo_pc = page.locator("#palavra_chave")
+            campo_pc.wait_for(state="visible", timeout=10000)
+            campo_pc.fill(pregao)
+
+            # ── 3. Seleciona UASG (Select2) ───────────────────────────────
+            if uasg.strip():
+                # Abre filtros avançados se necessário
+                try:
+                    campo_uf = page.locator("[name='uf']")
+                    if not campo_uf.is_visible():
+                        botao = page.locator("button:has-text('Filtros'), a:has-text('Filtros')")
+                        if botao.count() > 0:
+                            botao.first.click()
+                            campo_uf.wait_for(state="visible", timeout=3000)
+                except Exception:
+                    pass
+
                 try:
                     container = page.locator(".select2-selection--multiple").first
                     container.wait_for(state="visible", timeout=5000)
                     container.click()
                     page.wait_for_timeout(600)
-                    page.keyboard.type(ug, delay=100)
+                    page.keyboard.type(uasg, delay=100)
                     page.wait_for_timeout(1500)
                     opcao = page.locator(".select2-results__option").first
                     opcao.wait_for(state="visible", timeout=5000)
                     opcao.click()
                     page.wait_for_timeout(500)
+                    # Dispara change para habilitar botão Pesquisar
                     page.evaluate("""
                         const sel = document.getElementById('unidades_gerenciadoras');
                         if (sel) {
@@ -235,39 +241,59 @@ def buscar_itens_arp(ug: str, descricao: str, max_resultados: int = 10) -> list[
                         }
                     """)
                 except Exception as e:
-                    logger.warning("Erro ao selecionar UG: %s", e)
+                    logger.warning("Erro ao selecionar UASG: %s", e)
 
-            # Preenche descrição
-            try:
-                page.fill("[name='descricaoItem']", descricao)
-            except Exception:
-                page.fill("#palavra_chave", descricao)
-
-            # Aplica filtro
-            try:
-                page.click("#btn-aplicar-filtro")
-            except Exception:
-                page.click("button:has-text('Pesquisar')")
+                # Aplica filtro avançado
+                try:
+                    botao = page.locator("#btn-aplicar-filtro")
+                    if botao.count() > 0:
+                        if not botao.is_enabled():
+                            page.evaluate(
+                                "document.getElementById('btn-aplicar-filtro')"
+                                ".removeAttribute('disabled')"
+                            )
+                            page.wait_for_timeout(200)
+                        botao.scroll_into_view_if_needed()
+                        botao.click()
+                    else:
+                        campo_pc.press("Enter")
+                except Exception:
+                    campo_pc.press("Enter")
+            else:
+                # Busca simples sem UG
+                campo_pc.press("Enter")
 
             page.wait_for_load_state("networkidle", timeout=20000)
 
-            # 100 por página
+            # ── 4. Aguarda tabela carregar ─────────────────────────────────
+            try:
+                page.wait_for_selector("#itens_processing", state="hidden", timeout=15000)
+            except PTimeout:
+                pass
+            try:
+                page.wait_for_selector("#itens tbody tr td", timeout=15000)
+            except PTimeout:
+                logger.warning("Tabela não carregou — sem resultados.")
+                return resultados
+
+            # ── 5. Expande para 100 por página ────────────────────────────
             try:
                 campo = page.locator("select[name='itens_length']")
                 if campo.count() > 0:
                     campo.first.select_option("100")
                     page.wait_for_load_state("networkidle", timeout=10000)
+                    page.wait_for_selector("#itens_processing", state="hidden", timeout=10000)
             except Exception:
                 pass
 
-            # Extrai linhas
-            linhas = page.locator("table#itens tbody tr, table tbody tr").all()
-            logger.info("%d linhas encontradas.", len(linhas))
+            # ── 6. Extrai linhas ───────────────────────────────────────────
+            linhas = page.locator("#itens tbody tr").all()
+            logger.info("%d linhas encontradas para '%s' / UASG %s.", len(linhas), pregao, uasg)
 
             for linha in linhas[:max_resultados]:
                 try:
                     cels = linha.locator("td").all()
-                    if len(cels) < 8:
+                    if len(cels) < COL_ACAO + 1:
                         continue
 
                     textos = [c.inner_text().strip() for c in cels]
@@ -275,7 +301,9 @@ def buscar_itens_arp(ug: str, descricao: str, max_resultados: int = 10) -> list[
                     # Link de detalhe
                     link = ""
                     try:
-                        link_el = cels[-1].locator("a")
+                        link_el = cels[COL_ACAO].locator("a:has(i)")
+                        if link_el.count() == 0:
+                            link_el = cels[COL_ACAO].locator("a[href*='show']")
                         if link_el.count() > 0:
                             href = link_el.first.get_attribute("href") or ""
                             link = href if href.startswith("http") else \
@@ -290,7 +318,7 @@ def buscar_itens_arp(ug: str, descricao: str, max_resultados: int = 10) -> list[
                         fornecedor = detalhe.get("fornecedor", "")
 
                     valor_num = detalhe.get("valor_unitario", 0.0) or \
-                                _parse_br(textos[7] if len(textos) > 7 else "")
+                                _parse_br(textos[COL_SALDO] if len(textos) > COL_SALDO else "")
 
                     resultado = {
                         "numero_ata":      textos[COL_NUMERO_ATA]  if len(textos) > COL_NUMERO_ATA  else "",

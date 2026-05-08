@@ -1171,26 +1171,29 @@ def page_gerar_req(reqs, ncs):
                    "```\npip install playwright\nplaywright install chromium\n```\n\n"
                    "Este recurso só funciona localmente.")
     else:
-        p1, p2, p3 = st.columns([1, 3, 1])
-        p_ug   = p1.text_input("UG/UASG",          value=UG_PADRAO,  key="pesq_ug")
-        p_desc = p2.text_input("Descrição ou nº pregão/ARP", placeholder="ex: caneta, 90005/2026", key="pesq_desc")
-        p_max  = p3.number_input("Máx. resultados", min_value=1, max_value=20, value=5, key="pesq_max")
+        p1, p2, p3 = st.columns([1, 2, 1])
+        p_uasg  = p1.text_input("UASG",   value=UG_PADRAO, key="pesq_uasg",
+                                 help="Código da unidade gerenciadora (ex: 160482)")
+        p_pregao = p2.text_input("Nº do Pregão", placeholder="ex: 90005/2024",
+                                  key="pesq_pregao",
+                                  help="Número do pregão ou termo de busca")
+        p_max   = p3.number_input("Máx.", min_value=1, max_value=20, value=5,
+                                   key="pesq_max", help="Máximo de itens retornados")
 
-        if st.button("🔍 Pesquisar no Portal", key="btn_pesquisar"):
-            if not p_desc:
-                st.warning("Digite uma descrição ou número de pregão.")
+        if st.button("🔍 Pesquisar no Portal", key="btn_pesquisar", use_container_width=True):
+            if not p_pregao:
+                st.warning("Digite o número do pregão.")
             else:
-                with st.spinner("🌐 Buscando no portal contratos.sistema.gov.br..."):
+                with st.spinner("🌐 Buscando em contratos.sistema.gov.br..."):
                     try:
                         from pesquisa_compras import buscar_itens_arp, garantir_navegador
                         garantir_navegador()
-                        resultados = buscar_itens_arp(p_ug, p_desc, int(p_max))
+                        resultados = buscar_itens_arp(p_uasg, p_pregao, int(p_max))
                         st.session_state["pesq_resultados"] = resultados
                         if not resultados:
-                            st.info("Nenhum item encontrado. Verifique o termo de busca ou faça login no agente-licitacoes primeiro.")
+                            st.info("Nenhum item encontrado. Verifique o número do pregão.")
                     except Exception as e:
                         st.error(f"Erro na pesquisa: {e}")
-                        st.info("Verifique se está logado em contratos.sistema.gov.br via agente-licitacoes (session.json).")
 
         # Exibe resultados
         resultados_pesq = st.session_state.get("pesq_resultados", [])
