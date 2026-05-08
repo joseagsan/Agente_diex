@@ -263,9 +263,11 @@ def buscar_itens_pregao(uasg: str, num_pregao: str) -> ResultadoBusca:
     r = ResultadoBusca()
     r.add(f"📥 UASG={uasg} | Pregão={num_pregao}")
 
-    if not os.path.exists(SESSION_FILE):
+    cookies = _carregar_cookies()
+    if not cookies:
         raise FileNotFoundError(
-            "session.json não encontrado. Faça login via agente-licitacoes primeiro."
+            "Sessão não encontrada. Adicione 'session_json' nos Secrets do Streamlit Cloud "
+            "ou faça login via agente-licitacoes (session.json)."
         )
 
     s = _sessao()
