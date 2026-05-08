@@ -19,31 +19,34 @@ _HEADERS = {
 }
 
 
-def _normalizar_pregao(num: str) -> str:
+def _normalizar_pregao(num: str) -> tuple[str, str, str]:
     """
-    Normaliza o número do pregão para o formato comprasnet: AAAANNNNN
-    Aceita: "90008/2025", "2025/90008", "90008", "PE 90008/2025".
-    Usa (20\\d{2}) para não capturar subcadeias acidentais como "0008".
+    Normaliza o número do pregão para o formato comprasnet: AAAANNNNN.
+    Padrão esperado: "SEQUENCIAL/ANO" (ex: "90008/2025").
+
+    Returns:
+        (num_norm, seq, ano) — ex: ("202590008", "90008", "2025")
     """
     import datetime
     ano_atual = str(datetime.date.today().year)
 
-    # Remove prefixos textuais ("PE ", "Pregão ", etc.)
     num = re.sub(r"^[A-Za-z\s]+", "", num).strip()
 
-    # "SEQUENCIAL/ANO" — ex: "90008/2025"
-    m = re.search(r"(\d+)[/\-](20\d{2})$", num)
+    # Formato principal: "90008/2025"
+    m = re.match(r"^(\d+)[/\-](20\d{2})$", num)
     if m:
-        return m.group(2) + m.group(1).zfill(5)
+        seq, ano = m.group(1), m.group(2)
+        return ano + seq.zfill(5), seq, ano
 
-    # "ANO/SEQUENCIAL" — ex: "2025/90008"
-    m = re.search(r"^(20\d{2})[/\-](\d+)", num)
+    # Formato invertido: "2025/90008"
+    m = re.match(r"^(20\d{2})[/\-](\d+)$", num)
     if m:
-        return m.group(1) + m.group(2).zfill(5)
+        ano, seq = m.group(1), m.group(2)
+        return ano + seq.zfill(5), seq, ano
 
-    # Só número — assume ano atual
+    # Só número: assume ano atual
     seq = re.sub(r"\D", "", num)
-    return ano_atual + seq.zfill(5)
+    return ano_atual + seq.zfill(5), seq, ano_atual
 
 
 def _fmt(v: float) -> str:
@@ -65,26 +68,32 @@ def _parse_br(texto: str) -> float:
 _BASE = "https://www.comprasnet.gov.br"
 
 
-def _tentativas_pregao(uasg: str, num_norm: str) -> list[dict]:
+def _tentativas_pregao(uasg: str, num_norm: str, num_original: str) -> list[dict]:
     """
-    Retorna lista de tentativas: cada item tem 'label', 'method', 'url', 'data'.
-    Testa GET e POST porque o comprasnet às vezes exige POST para buscar.
+    Retorna lista de tentativas com POST e GET, testando o número
+    normalizado (AAAANNNNN) e o original (ex: 90008/2025).
     """
-    ata_url    = f"{_BASE}/livre/pregao/ata0.asp"
-    multi_url  = f"{_BASE}/livre/pregao/result_multif0.asp"
-    form_data  = {
-        "co_no_uasg": uasg,
-        "numprp":     num_norm,
-        "radio_tipo_pregao": "1",   # 1 = Pregão Eletrônico
-        "b":          "OK",
-    }
-    return [
-        {"label": "ATA — POST",  "method": "POST", "url": ata_url,   "data": form_data},
-        {"label": "ATA — GET",   "method": "GET",  "url": ata_url,
-         "data": None, "params": {"co_no_uasg": uasg, "numprp": num_norm}},
-        {"label": "Multi — GET", "method": "GET",  "url": multi_url,
-         "data": None, "params": {"co_no_uasg": uasg, "numprp": num_norm}},
+    ata_url   = f"{_BASE}/livre/pregao/ata0.asp"
+    multi_url = f"{_BASE}/livre/pregao/result_multif0.asp"
+
+    def _post(numprp):
+        return {"method": "POST", "url": ata_url, "data": {
+            "co_no_uasg": uasg, "numprp": numprp,
+            "radio_tipo_pregao": "1", "b": "OK",
+        }}
+
+    def _get(url, numprp):
+        return {"method": "GET", "url": url,
+                "params": {"co_no_uasg": uasg, "numprp": numprp}}
+
+    tentativas = [
+        {"label": f"ATA POST  num={num_norm}",    **_post(num_norm)},
+        {"label": f"ATA POST  num={num_original}", **_post(num_original)},
+        {"label": f"ATA GET   num={num_norm}",    **_get(ata_url, num_norm)},
+        {"label": f"ATA GET   num={num_original}", **_get(ata_url, num_original)},
+        {"label": f"Multi GET num={num_norm}",    **_get(multi_url, num_norm)},
     ]
+    return tentativas
 
 
 def _extrair_tabela(html_bytes: bytes) -> list[dict]:
@@ -191,12 +200,13 @@ def buscar_itens_pregao(uasg: str, num_pregao: str) -> ResultadoBusca:
     Retorna ResultadoBusca com itens, url_usada e log de diagnóstico.
     """
     r = ResultadoBusca()
-    num_norm = _normalizar_pregao(num_pregao)
+    num_norm, seq, ano = _normalizar_pregao(num_pregao)
 
-    r.add_log(f"📥 Entrada: UASG={uasg} | Pregão digitado='{num_pregao}'")
+    r.add_log(f"📥 Entrada: UASG={uasg} | Pregão='{num_pregao}' → seq={seq} ano={ano}")
     r.add_log(f"🔢 Normalizado para comprasnet: '{num_norm}' (formato AAAANNNNN)")
 
-    for t in _tentativas_pregao(uasg, num_norm):
+    num_original = re.sub(r"^[A-Za-z\s]+", "", num_pregao).strip()
+    for t in _tentativas_pregao(uasg, num_norm, num_original):
         label = t["label"]
         url   = t["url"]
         r.add_log(f"🌐 [{label}]: {url}")

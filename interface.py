@@ -1167,9 +1167,9 @@ def page_gerar_req(reqs, ncs):
     p1, p2 = st.columns([1, 2])
     p_uasg   = p1.text_input("UASG", value=UG_PADRAO, key="pesq_uasg",
                               help="Código da unidade gerenciadora (ex: 160482)")
-    p_pregao = p2.text_input("Nº do Pregão", placeholder="ex: 90005/2024",
+    p_pregao = p2.text_input("Nº do Pregão", placeholder="ex: 90008/2025",
                               key="pesq_pregao",
-                              help="Aceita: 90005/2024 · 90005 · PE 90005/2024")
+                              help="Formato: SEQUENCIAL/ANO — ex: 90008/2025")
 
     if st.button("🔍 Pesquisar no Portal Compras", key="btn_pesquisar", use_container_width=True):
         if not p_pregao:
