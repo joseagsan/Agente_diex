@@ -59,7 +59,9 @@ def _inject_css():
     t = _t()
     st.markdown(f"""
 <style>
-#MainMenu, footer, header {{visibility:hidden;}}
+#MainMenu, footer {{visibility:hidden;}}
+header {{visibility:hidden;}}
+[data-testid="collapsedControl"] {{visibility:visible !important; display:flex !important;}}
 .block-container {{padding:1.5rem 2rem 3rem !important; max-width:100% !important;}}
 
 section[data-testid="stSidebar"] {{width:230px !important; min-width:230px !important;}}
