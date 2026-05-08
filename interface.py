@@ -1176,19 +1176,19 @@ def page_gerar_req(reqs, ncs):
             st.warning("Digite o número do pregão.")
         else:
             with st.spinner("🌐 Buscando em comprasnet.gov.br..."):
-                try:
-                    from pesquisa_compras import buscar_itens_pregao, _normalizar_pregao
-                    num_norm = _normalizar_pregao(p_pregao)
-                    st.caption(f"🔗 Buscando: UASG `{p_uasg}` | Pregão normalizado: `{num_norm}` | "
-                               f"URL: `comprasnet.gov.br/livre/pregao/ata0.asp?"
-                               f"co_no_uasg={p_uasg}&numprp={num_norm}`")
-                    itens, url_usada = buscar_itens_pregao(p_uasg, p_pregao)
-                    st.session_state["pesq_resultados"] = itens
-                    st.session_state["pesq_url"] = url_usada
-                    if not itens:
-                        st.info("Nenhum item encontrado. Verifique UASG e número do pregão.")
-                except Exception as e:
-                    st.error(str(e))
+                from pesquisa_compras import buscar_itens_pregao
+                resultado = buscar_itens_pregao(p_uasg, p_pregao)
+                st.session_state["pesq_resultados"] = resultado.itens
+                st.session_state["pesq_url"]        = resultado.url_usada
+                st.session_state["pesq_log"]        = resultado.log
+
+            # Exibe log de diagnóstico sempre
+            with st.expander("🔍 Diagnóstico da busca", expanded=not resultado.itens):
+                for linha in resultado.log:
+                    st.text(linha)
+
+            if not resultado.itens:
+                st.warning("Nenhum item retornado. Veja o diagnóstico acima.")
 
         # Exibe resultados
         resultados_pesq = st.session_state.get("pesq_resultados", [])

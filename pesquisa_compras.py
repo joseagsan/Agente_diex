@@ -158,43 +158,64 @@ def _extrair_tabela(html_bytes: bytes) -> list[dict]:
     return itens
 
 
-def buscar_itens_pregao(uasg: str, num_pregao: str) -> tuple[list[dict], str]:
+class ResultadoBusca:
+    def __init__(self):
+        self.itens: list[dict] = []
+        self.url_usada: str = ""
+        self.log: list[str] = []   # diagnóstico passo a passo
+
+    def add_log(self, msg: str):
+        self.log.append(msg)
+        logger.info(msg)
+
+
+def buscar_itens_pregao(uasg: str, num_pregao: str) -> ResultadoBusca:
     """
     Busca itens de um pregão no comprasnet.gov.br.
-
-    Returns:
-        (lista_de_itens, url_acessada)
+    Retorna ResultadoBusca com itens, url_usada e log de diagnóstico.
     """
+    r = ResultadoBusca()
     num_norm = _normalizar_pregao(num_pregao)
-    logger.info("Buscando pregão %s → %s | UASG %s", num_pregao, num_norm, uasg)
 
-    tentativas = _urls_pregao(uasg, num_norm)
-    ultimo_erro = ""
+    r.add_log(f"📥 Entrada: UASG={uasg} | Pregão digitado='{num_pregao}'")
+    r.add_log(f"🔢 Normalizado para comprasnet: '{num_norm}' (formato AAAANNNNN)")
 
-    for label, url in tentativas:
+    for label, url in _urls_pregao(uasg, num_norm):
+        r.add_log(f"🌐 Tentando [{label}]: {url}")
         try:
-            logger.info("Tentando %s: %s", label, url)
             resp = requests.get(url, headers=_HEADERS, timeout=30, verify=False)
+            r.add_log(f"   → HTTP {resp.status_code} | {len(resp.content)} bytes | "
+                      f"encoding: {resp.encoding}")
+
+            # Prévia do conteúdo (para diagnóstico)
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(resp.content, "lxml")
+                texto_preview = soup.get_text(separator=" ", strip=True)[:300]
+            except Exception:
+                texto_preview = resp.content[:300].decode("latin-1", errors="replace")
+            r.add_log(f"   → Prévia: {texto_preview!r}")
+
             if resp.status_code != 200:
-                ultimo_erro = f"HTTP {resp.status_code} em {url}"
+                r.add_log(f"   ❌ Status {resp.status_code} — pulando.")
                 continue
             if len(resp.content) < 2000:
-                ultimo_erro = f"Página muito curta ({len(resp.content)}B) — pregão não encontrado: {url}"
+                r.add_log(f"   ❌ Conteúdo muito curto ({len(resp.content)}B) — pregão provavelmente não encontrado.")
                 continue
 
             itens = _extrair_tabela(resp.content)
-            if itens:
-                logger.info("%d itens extraídos de %s", len(itens), url)
-                return itens, url
+            r.add_log(f"   → {len(itens)} itens extraídos pela tabela.")
 
-            ultimo_erro = f"HTML obtido mas nenhuma tabela de itens reconhecida: {url}"
+            if itens:
+                r.itens = itens
+                r.url_usada = url
+                r.add_log(f"   ✅ Sucesso!")
+                return r
+
+            r.add_log(f"   ⚠️ HTML obtido mas nenhuma tabela de itens reconhecida.")
 
         except Exception as e:
-            ultimo_erro = f"Erro em {url}: {e}"
-            logger.warning(ultimo_erro)
+            r.add_log(f"   ❌ Exceção: {e}")
 
-    raise ValueError(
-        f"Não foi possível obter os itens.\n"
-        f"UASG: {uasg} | Pregão normalizado: {num_norm}\n"
-        f"Último erro: {ultimo_erro}"
-    )
+    r.add_log("❌ Nenhuma URL retornou itens.")
+    return r
