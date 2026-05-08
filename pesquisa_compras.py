@@ -44,15 +44,27 @@ def _carregar_cookies() -> list:
         with open(SESSION_FILE) as f:
             return json.load(f).get("cookies", [])
 
-    # 2. Streamlit secrets
+    # 2. Streamlit secrets — tenta raiz e todas as seções
     try:
         import streamlit as st
-        raw = st.secrets["session_json"]
+
+        def _achar_raw(node) -> str:
+            """Busca 'session_json' recursivamente em qualquer nível dos secrets."""
+            if hasattr(node, "keys"):
+                for k in node.keys():
+                    if k == "session_json":
+                        return str(node[k])
+                    sub = _achar_raw(node[k])
+                    if sub:
+                        return sub
+            return ""
+
+        raw = _achar_raw(st.secrets)
         if raw:
             logger.info("Sessão carregada dos Streamlit secrets.")
             return json.loads(raw).get("cookies", [])
-    except KeyError:
-        logger.warning("'session_json' não encontrado nos Streamlit secrets.")
+        else:
+            logger.warning("'session_json' não encontrado em nenhuma seção dos secrets.")
     except Exception as e:
         logger.warning("Erro ao ler Streamlit secrets: %s", e)
 
@@ -113,32 +125,53 @@ def _buscar_id_compra(s: requests.Session, uasg: str, num_pregao: str) -> str:
     """
     url_list = BASE + "/transparencia/compras"
     csrf = _csrf(s, url_list)
+    logger.info("CSRF obtido: %s...", csrf[:20] if csrf else "VAZIO")
+
     hdrs = _hdrs(csrf, url_list)
 
-    # Busca pelo número do pregão; filtra pelo UASG na resposta
     r = s.post(url_list + "/search",
                data={"start": 0, "length": 200, "draw": 1,
                      "search[value]": num_pregao},
                headers=hdrs, timeout=30)
+
+    logger.info("POST /compras/search → HTTP %s | %d bytes", r.status_code, len(r.content))
+
+    # Verifica se é JSON ou HTML (redirecionamento para login)
+    ct = r.headers.get("Content-Type", "")
+    if "text/html" in ct:
+        logger.error("Resposta é HTML — sessão provavelmente expirou. CT: %s", ct)
+        raise ValueError(
+            "Sessão expirada. Faça login novamente no agente-licitacoes e atualize o "
+            "session_json nos Secrets do Streamlit Cloud."
+        )
+
     r.raise_for_status()
-    rows = r.json().get("data", [])
+    payload = r.json()
+    rows = payload.get("data", [])
+    logger.info("Linhas retornadas: %d | recordsFiltered: %s",
+                len(rows), payload.get("recordsFiltered", "?"))
+
+    # Log das primeiras 3 linhas para diagnóstico
+    for i, row in enumerate(rows[:3]):
+        cols = [_txt(c) for c in row]
+        logger.info("  Linha %d: %s", i, " | ".join(cols[:7]))
 
     for row in rows:
         cols = [_txt(c) for c in row]
-        # Coluna 0 tem "CODIGO - NOME", coluna 5 tem "NUMERO/ANO"
         uasg_col   = cols[0] if cols else ""
         numero_col = cols[5] if len(cols) > 5 else ""
 
         if uasg in uasg_col and num_pregao in numero_col:
-            # Extrai ID do link
             for c in row:
                 ids = re.findall(r"/transparencia/compras/(\d+)/", str(c))
                 if ids:
+                    logger.info("ID encontrado: %s", ids[0])
                     return ids[0]
 
     raise ValueError(
-        f"Pregão {num_pregao} não encontrado para UASG {uasg}. "
-        f"Verifique o número (ex: 90009/2025) e se está logado."
+        f"Pregão '{num_pregao}' não encontrado para UASG {uasg} "
+        f"({len(rows)} resultado(s) retornado(s)). "
+        f"Verifique o número do pregão — formato esperado: 90009/2025"
     )
 
 
