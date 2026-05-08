@@ -175,6 +175,12 @@ def _load():
     return ler_ncs(), ler_reqs(), ler_fornecedores()
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _frases(tipo: str) -> list[str]:
+    from sheets_nc import ler_frases
+    return ["— escrever manualmente —"] + ler_frases(tipo)
+
+
 def carregar(forcar: bool = False):
     if forcar:
         _load.clear()
@@ -1026,11 +1032,6 @@ def page_gerar_req(reqs, ncs):
                   delta_color="normal" if saldo_apos >= 0 else "inverse")
 
     # ── Frases cadastradas (fora do form para reatividade)
-    @st.cache_data(ttl=60, show_spinner=False)
-    def _frases(tipo):
-        from sheets_nc import ler_frases
-        return ["— escrever manualmente —"] + ler_frases(tipo)
-
     col_i, col_j = st.columns(2)
     with col_i:
         st.caption("📝 Introdução")
@@ -1141,7 +1142,7 @@ def page_gerar_req(reqs, ncs):
             "PTRES":           ptres,
             "TIPO":            tipo,
             "FORNECEDOR_NOME": fornecedor,
-            "FORNECEDOR_CNPJ": _formatar_cnpj(cnpj),
+            "FORNECEDOR_CNPJ": cnpj,
             "UG":              ug,
             "OM":              om,
             "ASSUNTO":         assunto,

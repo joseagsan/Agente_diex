@@ -33,23 +33,40 @@ def playwright_disponivel() -> bool:
         return False
 
 
+def _caminho_chromium_sistema() -> str | None:
+    """Retorna o path do Chromium instalado via apt, se existir."""
+    import shutil
+    for nome in ("chromium", "chromium-browser", "chromium-bsu"):
+        path = shutil.which(nome)
+        if path:
+            return path
+    for path in ("/usr/bin/chromium", "/usr/bin/chromium-browser"):
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def garantir_navegador() -> None:
-    """Instala o navegador Chromium se ainda não estiver presente."""
+    """Verifica se o Playwright consegue abrir um navegador; instala se necessário."""
     import subprocess
     import sys
 
-    # Verifica se já funciona
+    # Testa com chromium do sistema (Streamlit Cloud via packages.txt)
     try:
         from playwright.sync_api import sync_playwright
+        exe = _caminho_chromium_sistema()
         with sync_playwright() as p:
-            b = p.chromium.launch(headless=True)
+            kwargs = {"headless": True}
+            if exe:
+                kwargs["executable_path"] = exe
+            b = p.chromium.launch(**kwargs)
             b.close()
             return
     except Exception:
         pass
 
-    logger.info("Instalando Chromium para Playwright...")
-    # Tenta com deps; se falhar (sem permissão apt), tenta sem
+    # Tenta baixar o chromium do playwright
+    logger.info("Instalando Chromium via playwright install...")
     for cmd in [
         [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
         [sys.executable, "-m", "playwright", "install", "chromium"],
@@ -63,8 +80,7 @@ def garantir_navegador() -> None:
             continue
 
     raise RuntimeError(
-        "Não foi possível instalar o Chromium. "
-        "Execute manualmente: playwright install chromium"
+        "Chromium não encontrado. Execute: playwright install chromium"
     )
 
 
@@ -165,8 +181,12 @@ def buscar_itens_arp(ug: str, descricao: str, max_resultados: int = 10) -> list[
     resultados = []
 
     with sync_playwright() as p:
+        exe = _caminho_chromium_sistema()
+        launch_kwargs: dict = {"headless": True}
+        if exe:
+            launch_kwargs["executable_path"] = exe
         try:
-            browser = p.chromium.launch(headless=True, channel="chrome")
+            browser = p.chromium.launch(**launch_kwargs)
         except Exception:
             browser = p.chromium.launch(headless=True)
 
