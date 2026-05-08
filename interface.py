@@ -1164,36 +1164,26 @@ def page_gerar_req(reqs, ncs):
     st.divider()
     st.subheader("🔍 Pesquisar Item no Portal Compras.gov.br")
 
-    from pesquisa_compras import playwright_disponivel
+    p1, p2 = st.columns([1, 2])
+    p_uasg   = p1.text_input("UASG", value=UG_PADRAO, key="pesq_uasg",
+                              help="Código da unidade gerenciadora (ex: 160482)")
+    p_pregao = p2.text_input("Nº do Pregão", placeholder="ex: 90005/2024",
+                              key="pesq_pregao",
+                              help="Aceita: 90005/2024 · 90005 · PE 90005/2024")
 
-    if not playwright_disponivel():
-        st.warning("⚠️ Playwright não instalado. Execute no terminal:\n\n"
-                   "```\npip install playwright\nplaywright install chromium\n```\n\n"
-                   "Este recurso só funciona localmente.")
-    else:
-        p1, p2, p3 = st.columns([1, 2, 1])
-        p_uasg  = p1.text_input("UASG",   value=UG_PADRAO, key="pesq_uasg",
-                                 help="Código da unidade gerenciadora (ex: 160482)")
-        p_pregao = p2.text_input("Nº do Pregão", placeholder="ex: 90005/2024",
-                                  key="pesq_pregao",
-                                  help="Número do pregão ou termo de busca")
-        p_max   = p3.number_input("Máx.", min_value=1, max_value=20, value=5,
-                                   key="pesq_max", help="Máximo de itens retornados")
-
-        if st.button("🔍 Pesquisar no Portal", key="btn_pesquisar", use_container_width=True):
-            if not p_pregao:
-                st.warning("Digite o número do pregão.")
-            else:
-                with st.spinner("🌐 Buscando em contratos.sistema.gov.br..."):
-                    try:
-                        from pesquisa_compras import buscar_itens_arp, garantir_navegador
-                        garantir_navegador()
-                        resultados = buscar_itens_arp(p_uasg, p_pregao, int(p_max))
-                        st.session_state["pesq_resultados"] = resultados
-                        if not resultados:
-                            st.info("Nenhum item encontrado. Verifique o número do pregão.")
-                    except Exception as e:
-                        st.error(f"Erro na pesquisa: {e}")
+    if st.button("🔍 Pesquisar no Portal Compras", key="btn_pesquisar", use_container_width=True):
+        if not p_pregao:
+            st.warning("Digite o número do pregão.")
+        else:
+            with st.spinner("🌐 Buscando em comprasnet.gov.br..."):
+                try:
+                    from pesquisa_compras import buscar_itens_pregao
+                    resultados = buscar_itens_pregao(p_uasg, p_pregao)
+                    st.session_state["pesq_resultados"] = resultados
+                    if not resultados:
+                        st.info("Nenhum item encontrado. Verifique UASG e número do pregão.")
+                except Exception as e:
+                    st.error(f"Erro na pesquisa: {e}")
 
         # Exibe resultados
         resultados_pesq = st.session_state.get("pesq_resultados", [])

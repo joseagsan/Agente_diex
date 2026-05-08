@@ -1,348 +1,191 @@
 """
-Pesquisa de itens de ARP no portal contratos.sistema.gov.br para preenchimento de REQ.
-Seletores validados pelo agente-licitacoes/crawler.py.
+Pesquisa de itens de pregão no portal comprasnet.gov.br.
+Usa requests para buscar o HTML público da ATA e Claude API para extrair os dados,
+seguindo o mesmo padrão do extrator_pdf.py.
 """
+import json
 import logging
-import os
 import re
+
+import requests
 
 logger = logging.getLogger(__name__)
 
-SESSION_FILE = "session.json"
-BASE_URL = "https://contratos.sistema.gov.br/transparencia/arp-item"
+# comprasnet usa latin-1 e às vezes tem SSL velho
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept-Language": "pt-BR,pt;q=0.9",
+}
 
-# Índices das colunas na tabela #itens
-COL_NUMERO_ATA  = 0
-COL_UNIDADE     = 1
-COL_NUMERO_ITEM = 2
-COL_PDM         = 3
-COL_DESCRICAO   = 4
-COL_UF          = 5
-COL_FORNECEDOR  = 6
-COL_QTD         = 7
-COL_SALDO       = 8
-COL_INICIO_VIG  = 9
-COL_FIM_VIG     = 10
-COL_ACAO        = 11
+_PROMPT_ITENS = """Analise esta página do portal comprasnet.gov.br que contém os itens de um pregão/ATA
+de Registro de Preços. Extraia TODOS os itens e retorne SOMENTE um JSON válido com a estrutura abaixo.
+Não inclua texto fora do JSON.
+
+{
+  "vigencia_inicio": "DD/MM/YYYY",
+  "vigencia_fim": "DD/MM/YYYY",
+  "itens": [
+    {
+      "numero_item": "1",
+      "descricao": "descrição completa do item",
+      "und": "UN",
+      "valor_unitario": 0.00,
+      "fornecedor": "Razão Social do fornecedor",
+      "cnpj": "00.000.000/0000-00"
+    }
+  ]
+}
+
+Use "" para campos não encontrados e 0.0 para valores não encontrados.
+Formate CNPJ como XX.XXX.XXX/XXXX-XX.
+"""
 
 
-def playwright_disponivel() -> bool:
+def _normalizar_pregao(num: str) -> str:
+    """
+    Normaliza o número do pregão para o formato do comprasnet: AAAANNNNN
+    Aceita: "90005", "90005/2024", "2024/90005", "PE 90005/2024", etc.
+    """
+    import datetime
+    ano_atual = str(datetime.date.today().year)
+
+    # Remove letras e espaços do início ("PE ", "SRP ", etc.)
+    num = re.sub(r"^[A-Za-z\s]+", "", num).strip()
+
+    # Extrai ano e sequencial
+    m = re.search(r"(\d{4})[/\-](\d+)", num)
+    if m:
+        ano, seq = m.group(1), m.group(2)
+    else:
+        m2 = re.search(r"(\d+)[/\-](\d{4})", num)
+        if m2:
+            seq, ano = m2.group(1), m2.group(2)
+        else:
+            seq = re.sub(r"\D", "", num)
+            ano = ano_atual
+
+    return ano + seq.zfill(5)
+
+
+def _html_para_texto(html_bytes: bytes) -> str:
+    """Converte HTML em texto limpo para enviar ao Claude."""
     try:
-        import playwright  # noqa
-        return True
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_bytes, "lxml")
+        for tag in soup(["script", "style", "head"]):
+            tag.decompose()
+        texto = soup.get_text(separator="\n", strip=True)
+        texto = re.sub(r"\n{3,}", "\n\n", texto)
+        return texto[:15000]
     except ImportError:
-        return False
+        texto = re.sub(r"<[^>]+>", " ", html_bytes.decode("latin-1", errors="replace"))
+        return re.sub(r"\s{2,}", " ", texto)[:15000]
 
 
-def _caminho_chromium_sistema() -> str | None:
-    import shutil
-    for nome in ("chromium", "chromium-browser"):
-        path = shutil.which(nome)
-        if path:
-            return path
-    for path in ("/usr/bin/chromium", "/usr/bin/chromium-browser"):
-        if os.path.exists(path):
-            return path
-    return None
+def _extrair_com_claude(texto: str) -> dict:
+    """Envia o texto ao Claude API e extrai JSON de itens (padrão extrator_pdf.py)."""
+    from config import ANTHROPIC_API_KEY
+    import anthropic
 
-
-def garantir_navegador() -> None:
-    """Verifica se o Playwright consegue abrir um navegador; instala se necessário."""
-    import subprocess
-    import sys
-
-    try:
-        from playwright.sync_api import sync_playwright
-        exe = _caminho_chromium_sistema()
-        with sync_playwright() as p:
-            kwargs: dict = {"headless": True}
-            if exe:
-                kwargs["executable_path"] = exe
-            b = p.chromium.launch(**kwargs)
-            b.close()
-            return
-    except Exception:
-        pass
-
-    logger.info("Instalando Chromium via playwright install...")
-    for cmd in [
-        [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
-        [sys.executable, "-m", "playwright", "install", "chromium"],
-    ]:
-        try:
-            r = subprocess.run(cmd, capture_output=True, timeout=300)
-            if r.returncode == 0:
-                logger.info("Chromium instalado.")
-                return
-        except Exception:
-            continue
-
-    raise RuntimeError("Chromium não encontrado. Execute: playwright install chromium")
-
-
-def _parse_br(texto: str) -> float:
-    t = str(texto).strip().replace("R$", "").replace("\xa0", "").replace(" ", "")
-    if not t:
-        return 0.0
-    if "," in t:
-        t = t.replace(".", "").replace(",", ".")
-    try:
-        return float(t)
-    except ValueError:
-        return 0.0
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=4000,
+        messages=[{
+            "role": "user",
+            "content": f"{_PROMPT_ITENS}\n\n---\nCONTEÚDO DA PÁGINA:\n{texto}",
+        }],
+    )
+    raw = resp.content[0].text.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    return json.loads(raw.strip())
 
 
 def _fmt(v: float) -> str:
     return "R$ " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _extrair_detalhe(context, link: str) -> dict:
-    """Abre a página de detalhe e extrai valor unitário, UND, fornecedor e CNPJ."""
-    page = context.new_page()
-    dados = {"valor_unitario": 0.0, "und": "", "fornecedor": "", "cnpj": ""}
-    try:
-        page.goto(link, wait_until="networkidle", timeout=20000)
-        content = page.content()
+# ── URLs do comprasnet ─────────────────────────────────────────────────────────
 
-        # Valor unitário
-        try:
-            tabela = page.locator("table:has(th:has-text('Valor unitário'))")
-            if tabela.count() > 0:
-                td = tabela.first.locator("tbody tr:first-child td").last
-                if td.count() > 0:
-                    dados["valor_unitario"] = _parse_br(td.inner_text())
-        except Exception:
-            pass
-
-        # Unidade de medida
-        try:
-            tabela = page.locator("table:has(th:has-text('Unidade de fornecimento'))")
-            if tabela.count() == 0:
-                tabela = page.locator("table:has(th:has-text('Unidade'))")
-            if tabela.count() > 0:
-                td = tabela.first.locator("tbody tr:first-child td").nth(1)
-                if td.count() > 0:
-                    dados["und"] = td.inner_text().strip()
-        except Exception:
-            pass
-
-        # CNPJ
-        m = re.search(r"(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})", content)
-        if m:
-            dados["cnpj"] = m.group(1)
-
-        # Fornecedor — tenta tabela primeiro
-        try:
-            tabela = page.locator("table:has(th:has-text('Fornecedor'))")
-            if tabela.count() > 0:
-                td = tabela.first.locator("tbody tr:first-child td").nth(1)
-                if td.count() > 0:
-                    dados["fornecedor"] = td.inner_text().strip()
-        except Exception:
-            pass
-
-        if not dados["fornecedor"]:
-            for pattern in [
-                r"Fornecedor[^:]*?:\s*([^\n<]{5,100})",
-                r"Razão Social[^:]*?:\s*([^\n<]{5,100})",
-            ]:
-                m = re.search(pattern, content, re.IGNORECASE)
-                if m:
-                    dados["fornecedor"] = m.group(1).strip()
-                    break
-
-        return dados
-    except Exception as e:
-        logger.warning("Erro ao extrair detalhe de %s: %s", link, e)
-        return dados
-    finally:
-        page.close()
+def _urls_pregao(uasg: str, num_normalizado: str) -> list[str]:
+    """Retorna lista de URLs a tentar para a ATA do pregão."""
+    return [
+        # ATA pública (mais completa — fornecedor + preço + vigência)
+        f"https://www.comprasnet.gov.br/livre/pregao/ata0.asp"
+        f"?co_no_uasg={uasg}&numprp={num_normalizado}",
+        # Resultado por fornecedor (fallback)
+        f"https://www.comprasnet.gov.br/livre/pregao/result_multif0.asp"
+        f"?co_no_uasg={uasg}&numprp={num_normalizado}",
+    ]
 
 
-def buscar_itens_arp(uasg: str, pregao: str, max_resultados: int = 10) -> list[dict]:
+# ── API pública ────────────────────────────────────────────────────────────────
+
+def buscar_itens_pregao(uasg: str, num_pregao: str) -> list[dict]:
     """
-    Busca itens de ARP no portal contratos.sistema.gov.br.
+    Busca itens de um pregão no comprasnet.gov.br.
 
     Args:
         uasg: código UASG (ex: "160482")
-        pregao: número do pregão ou termo de busca (ex: "90005/2024")
-        max_resultados: máximo de itens retornados
+        num_pregao: número do pregão (ex: "90005/2024", "90005", "PE 90005/2024")
 
     Returns:
-        Lista de dicts com: numero_ata, numero_item, descricao, und,
-        valor_unit, valor_unit_num, fornecedor, cnpj,
+        Lista de dicts com: numero_item, descricao, und,
+        valor_unit_num, valor_unit, fornecedor, cnpj,
         vigencia_inicio, vigencia_fim
     """
-    from playwright.sync_api import sync_playwright, TimeoutError as PTimeout
+    num_norm = _normalizar_pregao(num_pregao)
+    logger.info("Buscando pregão %s (normalizado: %s) UASG %s", num_pregao, num_norm, uasg)
+
+    html_bytes = None
+    url_usada = ""
+
+    for url in _urls_pregao(uasg, num_norm):
+        try:
+            resp = requests.get(url, headers=_HEADERS, timeout=30, verify=False)
+            # comprasnet retorna 200 mesmo para "não encontrado" — verifica conteúdo
+            if resp.status_code == 200 and len(resp.content) > 2000:
+                html_bytes = resp.content
+                url_usada = url
+                logger.info("HTML obtido de: %s (%d bytes)", url, len(html_bytes))
+                break
+        except Exception as e:
+            logger.warning("Falha em %s: %s", url, e)
+
+    if not html_bytes:
+        raise ValueError(
+            f"Pregão {num_pregao} não encontrado para UASG {uasg}. "
+            f"Verifique o número e o formato (ex: 90005/2024)."
+        )
+
+    texto = _html_para_texto(html_bytes)
+
+    try:
+        dados = _extrair_com_claude(texto)
+    except Exception as e:
+        raise RuntimeError(f"Erro ao extrair dados com Claude: {e}") from e
+
+    itens_brutos = dados.get("itens", [])
+    vig_inicio = dados.get("vigencia_inicio", "")
+    vig_fim = dados.get("vigencia_fim", "")
 
     resultados = []
-    exe = _caminho_chromium_sistema()
+    for it in itens_brutos:
+        v = float(it.get("valor_unitario") or 0)
+        resultados.append({
+            "numero_item":     str(it.get("numero_item", "")),
+            "descricao":       str(it.get("descricao", "")),
+            "und":             str(it.get("und", "UN")),
+            "valor_unit_num":  v,
+            "valor_unit":      _fmt(v),
+            "fornecedor":      str(it.get("fornecedor", "")),
+            "cnpj":            str(it.get("cnpj", "")),
+            "vigencia_inicio": vig_inicio,
+            "vigencia_fim":    vig_fim,
+            "_url":            url_usada,
+        })
 
-    with sync_playwright() as p:
-        launch_kw: dict = {"headless": True}
-        if exe:
-            launch_kw["executable_path"] = exe
-        try:
-            browser = p.chromium.launch(**launch_kw)
-        except Exception:
-            browser = p.chromium.launch(headless=True)
-
-        ctx_kw: dict = {}
-        if os.path.exists(SESSION_FILE):
-            ctx_kw["storage_state"] = SESSION_FILE
-
-        ctx = browser.new_context(**ctx_kw)
-        page = ctx.new_page()
-
-        try:
-            page.goto(BASE_URL, wait_until="networkidle", timeout=30000)
-
-            # ── 1. Garante status Vigente ──────────────────────────────────
-            try:
-                page.check("#vigente", timeout=3000)
-            except Exception:
-                pass
-
-            # ── 2. Preenche Palavra-chave (pregão) ────────────────────────
-            campo_pc = page.locator("#palavra_chave")
-            campo_pc.wait_for(state="visible", timeout=10000)
-            campo_pc.fill(pregao)
-
-            # ── 3. Seleciona UASG (Select2) ───────────────────────────────
-            if uasg.strip():
-                # Abre filtros avançados se necessário
-                try:
-                    campo_uf = page.locator("[name='uf']")
-                    if not campo_uf.is_visible():
-                        botao = page.locator("button:has-text('Filtros'), a:has-text('Filtros')")
-                        if botao.count() > 0:
-                            botao.first.click()
-                            campo_uf.wait_for(state="visible", timeout=3000)
-                except Exception:
-                    pass
-
-                try:
-                    container = page.locator(".select2-selection--multiple").first
-                    container.wait_for(state="visible", timeout=5000)
-                    container.click()
-                    page.wait_for_timeout(600)
-                    page.keyboard.type(uasg, delay=100)
-                    page.wait_for_timeout(1500)
-                    opcao = page.locator(".select2-results__option").first
-                    opcao.wait_for(state="visible", timeout=5000)
-                    opcao.click()
-                    page.wait_for_timeout(500)
-                    # Dispara change para habilitar botão Pesquisar
-                    page.evaluate("""
-                        const sel = document.getElementById('unidades_gerenciadoras');
-                        if (sel) {
-                            sel.dispatchEvent(new Event('change', { bubbles: true }));
-                            if (typeof $ !== 'undefined') $(sel).trigger('change');
-                        }
-                    """)
-                except Exception as e:
-                    logger.warning("Erro ao selecionar UASG: %s", e)
-
-                # Aplica filtro avançado
-                try:
-                    botao = page.locator("#btn-aplicar-filtro")
-                    if botao.count() > 0:
-                        if not botao.is_enabled():
-                            page.evaluate(
-                                "document.getElementById('btn-aplicar-filtro')"
-                                ".removeAttribute('disabled')"
-                            )
-                            page.wait_for_timeout(200)
-                        botao.scroll_into_view_if_needed()
-                        botao.click()
-                    else:
-                        campo_pc.press("Enter")
-                except Exception:
-                    campo_pc.press("Enter")
-            else:
-                # Busca simples sem UG
-                campo_pc.press("Enter")
-
-            page.wait_for_load_state("networkidle", timeout=20000)
-
-            # ── 4. Aguarda tabela carregar ─────────────────────────────────
-            try:
-                page.wait_for_selector("#itens_processing", state="hidden", timeout=15000)
-            except PTimeout:
-                pass
-            try:
-                page.wait_for_selector("#itens tbody tr td", timeout=15000)
-            except PTimeout:
-                logger.warning("Tabela não carregou — sem resultados.")
-                return resultados
-
-            # ── 5. Expande para 100 por página ────────────────────────────
-            try:
-                campo = page.locator("select[name='itens_length']")
-                if campo.count() > 0:
-                    campo.first.select_option("100")
-                    page.wait_for_load_state("networkidle", timeout=10000)
-                    page.wait_for_selector("#itens_processing", state="hidden", timeout=10000)
-            except Exception:
-                pass
-
-            # ── 6. Extrai linhas ───────────────────────────────────────────
-            linhas = page.locator("#itens tbody tr").all()
-            logger.info("%d linhas encontradas para '%s' / UASG %s.", len(linhas), pregao, uasg)
-
-            for linha in linhas[:max_resultados]:
-                try:
-                    cels = linha.locator("td").all()
-                    if len(cels) < COL_ACAO + 1:
-                        continue
-
-                    textos = [c.inner_text().strip() for c in cels]
-
-                    # Link de detalhe
-                    link = ""
-                    try:
-                        link_el = cels[COL_ACAO].locator("a:has(i)")
-                        if link_el.count() == 0:
-                            link_el = cels[COL_ACAO].locator("a[href*='show']")
-                        if link_el.count() > 0:
-                            href = link_el.first.get_attribute("href") or ""
-                            link = href if href.startswith("http") else \
-                                   "https://contratos.sistema.gov.br" + href
-                    except Exception:
-                        pass
-
-                    detalhe = _extrair_detalhe(ctx, link) if link else {}
-
-                    fornecedor = textos[COL_FORNECEDOR] if len(textos) > COL_FORNECEDOR else ""
-                    if not fornecedor:
-                        fornecedor = detalhe.get("fornecedor", "")
-
-                    valor_num = detalhe.get("valor_unitario", 0.0) or \
-                                _parse_br(textos[COL_SALDO] if len(textos) > COL_SALDO else "")
-
-                    resultado = {
-                        "numero_ata":      textos[COL_NUMERO_ATA]  if len(textos) > COL_NUMERO_ATA  else "",
-                        "numero_item":     textos[COL_NUMERO_ITEM] if len(textos) > COL_NUMERO_ITEM else "",
-                        "descricao":       textos[COL_DESCRICAO]   if len(textos) > COL_DESCRICAO   else "",
-                        "und":             detalhe.get("und", ""),
-                        "valor_unit_num":  valor_num,
-                        "valor_unit":      _fmt(valor_num),
-                        "fornecedor":      fornecedor,
-                        "cnpj":            detalhe.get("cnpj", ""),
-                        "vigencia_inicio": textos[COL_INICIO_VIG] if len(textos) > COL_INICIO_VIG else "",
-                        "vigencia_fim":    textos[COL_FIM_VIG]    if len(textos) > COL_FIM_VIG    else "",
-                    }
-
-                    if resultado["descricao"]:
-                        resultados.append(resultado)
-
-                except Exception as e:
-                    logger.warning("Erro ao processar linha: %s", e)
-
-        except Exception as e:
-            logger.error("Erro na pesquisa: %s", e)
-            raise
-        finally:
-            browser.close()
-
+    logger.info("%d itens extraídos.", len(resultados))
     return resultados
