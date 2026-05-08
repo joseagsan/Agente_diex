@@ -1,51 +1,58 @@
 """
-Pesquisa de itens de pregão no comprasnet.gov.br via Playwright.
-Preenche o formulário real da página, igual ao uso manual.
+Pesquisa de itens de pregão em contratos.sistema.gov.br.
+Fluxo:
+  1. POST /transparencia/compras/search  →  acha ID da compra pelo UASG + número pregão
+  2. POST /transparencia/compras/{ID}/itens/search  →  lista itens (número, descrição)
+  3. GET  /transparencia/compras/{ID}/itens/{ITEM_ID}/show  →  detalhe (preço, fornecedor, CNPJ, vigência)
+Requer session.json válido (login via agente-licitacoes).
 """
 import logging
 import os
 import re
 
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import requests
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-_BASE = "https://www.comprasnet.gov.br"
-_ATA_URL = f"{_BASE}/livre/pregao/ata0.asp"
+BASE          = "https://contratos.sistema.gov.br"
+SESSION_FILE  = os.path.join(os.path.dirname(__file__),
+                             "..", "agente-licitacoes", "session.json")
 
 
-# ── Normalização ───────────────────────────────────────────────────────────────
+# ── Sessão autenticada ─────────────────────────────────────────────────────────
 
-def _normalizar_pregao(num: str) -> tuple[str, str, str]:
-    """
-    Extrai seq e ano do formato "90008/2025".
-    Returns (num_norm_AAAANNNNN, seq, ano)
-    """
-    import datetime
-    ano_atual = str(datetime.date.today().year)
-    num = re.sub(r"^[A-Za-z\s]+", "", num).strip()
+def _sessao() -> requests.Session:
+    import json
+    s = requests.Session()
+    s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0"})
+    if os.path.exists(SESSION_FILE):
+        with open(SESSION_FILE) as f:
+            data = json.load(f)
+        for c in data.get("cookies", []):
+            s.cookies.set(c["name"], c["value"], domain=c.get("domain", ""))
+    return s
 
-    # "90008/2025"
-    m = re.match(r"^(\d+)[/\-](20\d{2})$", num)
-    if m:
-        seq, ano = m.group(1), m.group(2)
-        return ano + seq.zfill(5), seq, ano
 
-    # "2025/90008"
-    m = re.match(r"^(20\d{2})[/\-](\d+)$", num)
-    if m:
-        ano, seq = m.group(1), m.group(2)
-        return ano + seq.zfill(5), seq, ano
+def _csrf(s: requests.Session, url: str) -> str:
+    r = s.get(url, timeout=20)
+    tag = BeautifulSoup(r.text, "lxml").find("meta", {"name": "csrf-token"})
+    return tag["content"] if tag else ""
 
-    seq = re.sub(r"\D", "", num)
-    return ano_atual + seq.zfill(5), seq, ano_atual
+
+def _hdrs(csrf_token: str, referer: str) -> dict:
+    return {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        "X-CSRF-TOKEN": csrf_token,
+        "Referer": referer,
+    }
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _fmt(v: float) -> str:
-    return "R$ " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+def _txt(html) -> str:
+    return BeautifulSoup(str(html), "lxml").get_text(strip=True)
 
 
 def _parse_br(texto: str) -> float:
@@ -60,107 +67,142 @@ def _parse_br(texto: str) -> float:
         return 0.0
 
 
-def _extrair_tabela_html(html_bytes: bytes, vig_inicio: str = "", vig_fim: str = "") -> list[dict]:
-    """Extrai itens de uma tabela HTML do comprasnet."""
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html_bytes, "lxml")
+def _fmt(v: float) -> str:
+    return "R$ " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-    texto = soup.get_text()
-    if not vig_inicio:
-        m = re.search(r"vig[eê]ncia[:\s]+(\d{2}/\d{2}/\d{4})[^0-9]*(\d{2}/\d{2}/\d{4})",
-                      texto, re.IGNORECASE)
-        if m:
-            vig_inicio, vig_fim = m.group(1), m.group(2)
 
-    cnpj_global = ""
-    m = re.search(r"(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})", texto)
-    if m:
-        cnpj_global = m.group(1)
+# ── Passo 1: achar ID da compra ────────────────────────────────────────────────
 
-    itens: list[dict] = []
-    for tabela in soup.find_all("table"):
-        headers_els = tabela.find_all("th") or (tabela.find("tr").find_all("td") if tabela.find("tr") else [])
-        headers = [h.get_text(strip=True).lower() for h in headers_els]
+def _buscar_id_compra(s: requests.Session, uasg: str, num_pregao: str) -> str:
+    """
+    Retorna o ID interno da compra (ex: '795827') para a combinação UASG + número pregão.
+    """
+    url_list = BASE + "/transparencia/compras"
+    csrf = _csrf(s, url_list)
+    hdrs = _hdrs(csrf, url_list)
 
-        col = {}
-        for i, h in enumerate(headers):
-            if re.search(r"\bitem\b|\bnr\.?\b|\bn[oº]\.?\b", h): col.setdefault("numero_item", i)
-            elif re.search(r"descri[cç]", h):                     col.setdefault("descricao", i)
-            elif re.search(r"unid|und\b",  h):                    col.setdefault("und", i)
-            elif re.search(r"unit[aá]rio|unit\b|vl.*unit", h):    col.setdefault("valor_unitario", i)
-            elif re.search(r"fornecedor|empresa|raz[aã]o",  h):   col.setdefault("fornecedor", i)
-            elif re.search(r"cnpj", h):                            col.setdefault("cnpj", i)
+    # Busca pelo número do pregão; filtra pelo UASG na resposta
+    r = s.post(url_list + "/search",
+               data={"start": 0, "length": 200, "draw": 1,
+                     "search[value]": num_pregao},
+               headers=hdrs, timeout=30)
+    r.raise_for_status()
+    rows = r.json().get("data", [])
 
-        if "descricao" not in col:
-            continue
+    for row in rows:
+        cols = [_txt(c) for c in row]
+        # Coluna 0 tem "CODIGO - NOME", coluna 5 tem "NUMERO/ANO"
+        uasg_col   = cols[0] if cols else ""
+        numero_col = cols[5] if len(cols) > 5 else ""
 
-        for linha in tabela.find_all("tr")[1:]:
-            cels = linha.find_all("td")
-            if len(cels) < 2:
-                continue
+        if uasg in uasg_col and num_pregao in numero_col:
+            # Extrai ID do link
+            for c in row:
+                ids = re.findall(r"/transparencia/compras/(\d+)/", str(c))
+                if ids:
+                    return ids[0]
 
-            def _c(key):
-                idx = col.get(key)
-                return cels[idx].get_text(strip=True) if idx is not None and idx < len(cels) else ""
+    raise ValueError(
+        f"Pregão {num_pregao} não encontrado para UASG {uasg}. "
+        f"Verifique o número (ex: 90009/2025) e se está logado."
+    )
 
-            desc = _c("descricao")
-            if not desc:
-                continue
 
-            v = _parse_br(_c("valor_unitario"))
+# ── Passo 2: listar itens ──────────────────────────────────────────────────────
+
+def _listar_itens(s: requests.Session, compra_id: str) -> list[dict]:
+    """
+    Retorna lista básica de itens: {numero, descricao, item_id}.
+    """
+    url_itens = f"{BASE}/transparencia/compras/{compra_id}/itens"
+    csrf = _csrf(s, url_itens)
+    hdrs = _hdrs(csrf, url_itens)
+
+    r = s.post(url_itens + "/search",
+               data={"start": 0, "length": 500, "draw": 1},
+               headers=hdrs, timeout=30)
+    r.raise_for_status()
+    rows = r.json().get("data", [])
+
+    itens = []
+    for row in rows:
+        numero = _txt(row[0]) if row else ""
+        descricao = _txt(row[2]) if len(row) > 2 else ""
+
+        # Extrai item_id do link na coluna de ações
+        item_id = ""
+        for c in row:
+            ids = re.findall(r"/itens/(\d+)/show", str(c))
+            if ids:
+                item_id = ids[0]
+                break
+
+        if descricao and item_id:
             itens.append({
-                "numero_item":     _c("numero_item"),
-                "descricao":       desc,
-                "und":             _c("und") or "UN",
-                "valor_unit_num":  v,
-                "valor_unit":      _fmt(v),
-                "fornecedor":      _c("fornecedor"),
-                "cnpj":            _c("cnpj") or cnpj_global,
-                "vigencia_inicio": vig_inicio,
-                "vigencia_fim":    vig_fim,
+                "numero":    numero,
+                "descricao": descricao,
+                "item_id":   item_id,
             })
+
     return itens
 
 
-# ── Playwright ─────────────────────────────────────────────────────────────────
+# ── Passo 3: detalhe de um item ────────────────────────────────────────────────
 
-def _caminho_chromium() -> str | None:
-    import shutil
-    for nome in ("chromium", "chromium-browser"):
-        p = shutil.which(nome)
-        if p:
-            return p
-    for p in ("/usr/bin/chromium", "/usr/bin/chromium-browser"):
-        if os.path.exists(p):
-            return p
-    return None
+def _detalhe_item(s: requests.Session, compra_id: str, item_id: str) -> dict:
+    """
+    Busca fornecedor, CNPJ, valor unitário e vigência ARP na página de detalhe do item.
+    """
+    url = f"{BASE}/transparencia/compras/{compra_id}/itens/{item_id}/show"
+    r = s.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+    soup = BeautifulSoup(r.text, "lxml")
+    texto = soup.get_text(separator="\n", strip=True)
 
+    result = {
+        "und":             "UN",
+        "valor_unit_num":  0.0,
+        "valor_unit":      "R$ 0,00",
+        "fornecedor":      "",
+        "cnpj":            "",
+        "vigencia_inicio": "",
+        "vigencia_fim":    "",
+        "descricao_det":   "",
+    }
 
-def garantir_navegador() -> None:
-    import subprocess, sys
-    try:
-        from playwright.sync_api import sync_playwright
-        exe = _caminho_chromium()
-        with sync_playwright() as p:
-            kw: dict = {"headless": True}
-            if exe:
-                kw["executable_path"] = exe
-            b = p.chromium.launch(**kw)
-            b.close()
-            return
-    except Exception:
-        pass
-    for cmd in [
-        [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
-        [sys.executable, "-m", "playwright", "install", "chromium"],
-    ]:
-        try:
-            r = subprocess.run(cmd, capture_output=True, timeout=300)
-            if r.returncode == 0:
-                return
-        except Exception:
-            continue
-    raise RuntimeError("Chromium não encontrado. Execute: playwright install chromium")
+    # Descrição detalhada
+    m = re.search(r"Descrição detalhada[:\s\n]+([^\n]{5,300})", texto)
+    if m:
+        result["descricao_det"] = m.group(1).strip()
+
+    # Vigência ARP
+    m = re.search(r"Vig\. Início ARP[:\s\n]+(\d{2}/\d{2}/\d{4})", texto)
+    if m:
+        result["vigencia_inicio"] = m.group(1)
+    m = re.search(r"Vig\. Fim ARP[:\s\n]+(\d{2}/\d{2}/\d{4})", texto)
+    if m:
+        result["vigencia_fim"] = m.group(1)
+
+    # Fornecedor e CNPJ (seção "Fornecedores Homologados")
+    cnpjs = re.findall(r"(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})\s*[-–]\s*([^\n]{5,80})", texto)
+    if cnpjs:
+        result["cnpj"]       = cnpjs[0][0]
+        result["fornecedor"] = cnpjs[0][1].strip()
+
+    # Valor unitário — pega o "Val. Unitário" da tabela de fornecedores
+    m = re.search(r"Val\. Unit[aá]rio\s*\n([\d.,]+)", texto)
+    if m:
+        v = _parse_br(m.group(1))
+        result["valor_unit_num"] = v
+        result["valor_unit"]     = _fmt(v)
+    else:
+        # Tenta extrair da tabela de ATAs: último valor antes de "Valor Total"
+        vals = re.findall(r"\n([\d]+[.,][\d]{2})\n[\d]+[.,]", texto)
+        if vals:
+            v = _parse_br(vals[-1])
+            result["valor_unit_num"] = v
+            result["valor_unit"]     = _fmt(v)
+
+    return result
 
 
 # ── Resultado de busca ─────────────────────────────────────────────────────────
@@ -176,133 +218,71 @@ class ResultadoBusca:
         logger.info(msg)
 
 
-# ── Busca principal ────────────────────────────────────────────────────────────
+# ── API pública ────────────────────────────────────────────────────────────────
 
 def buscar_itens_pregao(uasg: str, num_pregao: str) -> ResultadoBusca:
     """
-    Abre comprasnet.gov.br/livre/pregao/ata0.asp com Playwright,
-    preenche o formulário com UASG e número do pregão e extrai os itens.
+    Busca todos os itens de um pregão em contratos.sistema.gov.br.
+
+    Args:
+        uasg: código UASG (ex: "160482")
+        num_pregao: número do pregão (ex: "90009/2025")
+
+    Returns:
+        ResultadoBusca com itens e log de diagnóstico.
     """
-    from playwright.sync_api import sync_playwright, TimeoutError as PTimeout
-
     r = ResultadoBusca()
-    num_norm, seq, ano = _normalizar_pregao(num_pregao)
-    r.add(f"📥 Entrada: UASG={uasg} | Pregão='{num_pregao}' → seq={seq} ano={ano} norm={num_norm}")
-    r.add(f"🌐 Abrindo: {_ATA_URL}")
+    r.add(f"📥 UASG={uasg} | Pregão={num_pregao}")
 
-    exe = _caminho_chromium()
-    launch_kw: dict = {"headless": True}
-    if exe:
-        launch_kw["executable_path"] = exe
-        r.add(f"🖥️ Usando Chromium do sistema: {exe}")
+    if not os.path.exists(SESSION_FILE):
+        raise FileNotFoundError(
+            "session.json não encontrado. Faça login via agente-licitacoes primeiro."
+        )
 
-    with sync_playwright() as p:
+    s = _sessao()
+
+    # Passo 1 — ID da compra
+    r.add("🔍 Buscando ID da compra...")
+    compra_id = _buscar_id_compra(s, uasg, num_pregao)
+    r.add(f"✅ ID encontrado: {compra_id} → {BASE}/transparencia/compras/{compra_id}/itens")
+    r.url_usada = f"{BASE}/transparencia/compras/{compra_id}/itens"
+
+    # Passo 2 — Lista itens
+    r.add("📋 Listando itens...")
+    itens_base = _listar_itens(s, compra_id)
+    r.add(f"✅ {len(itens_base)} itens encontrados.")
+
+    # Passo 3 — Detalhe de cada item (preço, fornecedor, vigência)
+    r.add("📦 Buscando detalhes de cada item (fornecedor, preço, vigência)...")
+    resultados = []
+    for it in itens_base:
         try:
-            browser = p.chromium.launch(**launch_kw)
-        except Exception:
-            browser = p.chromium.launch(headless=True)
-
-        page = browser.new_context().new_page()
-        try:
-            page.goto(_ATA_URL, wait_until="networkidle", timeout=30000)
-            r.add(f"✅ Página carregada. Título: {page.title()!r}")
-
-            # ── Inspeciona campos disponíveis ──────────────────────────────
-            campos = page.evaluate("""
-                () => Array.from(document.querySelectorAll('input, select, textarea'))
-                     .map(e => ({tag: e.tagName, type: e.type||'', name: e.name||'', id: e.id||''}))
-            """)
-            r.add(f"📋 Campos do formulário: {campos}")
-
-            # ── Seleciona "Pregão Eletrônico" ──────────────────────────────
-            for sel in ["input[value='0'][type='radio']",
-                        "input[name='radio_tipo_pregao'][value='0']",
-                        "input[type='radio']"]:
-                try:
-                    if page.locator(sel).count() > 0:
-                        page.locator(sel).first.check()
-                        r.add(f"☑️ Selecionado radio: {sel}")
-                        break
-                except Exception:
-                    pass
-
-            # ── Preenche UASG ──────────────────────────────────────────────
-            uasg_preenchido = False
-            for sel in ["input[name='co_no_uasg']", "input[name='uasg']",
-                        "#co_no_uasg", "#uasg", "input[name*='uasg' i]"]:
-                try:
-                    loc = page.locator(sel)
-                    if loc.count() > 0:
-                        loc.first.fill(uasg)
-                        r.add(f"✏️ UASG preenchido em: {sel}")
-                        uasg_preenchido = True
-                        break
-                except Exception:
-                    pass
-            if not uasg_preenchido:
-                r.add("⚠️ Campo UASG não encontrado pelos seletores conhecidos.")
-
-            # ── Preenche nº do pregão ──────────────────────────────────────
-            pregao_preenchido = False
-            for valor in [num_norm, seq, num_pregao]:
-                for sel in ["input[name='numprp']", "input[name='num_pregao']",
-                            "input[name='nu_licitacao']", "#numprp", "#num_pregao",
-                            "input[name*='preg' i]", "input[name*='num' i]"]:
-                    try:
-                        loc = page.locator(sel)
-                        if loc.count() > 0 and loc.first.is_visible():
-                            loc.first.fill(valor)
-                            r.add(f"✏️ Pregão preenchido '{valor}' em: {sel}")
-                            pregao_preenchido = True
-                            break
-                    except Exception:
-                        pass
-                if pregao_preenchido:
-                    break
-
-            if not pregao_preenchido:
-                r.add("⚠️ Campo do pregão não encontrado. Campos disponíveis listados acima.")
-
-            # ── Submete o formulário ───────────────────────────────────────
-            submetido = False
-            for sel in ["input[name='b'][value='OK']", "input[type='submit']",
-                        "button[type='submit']", "input[value*='Pesquis' i]",
-                        "input[value='OK']"]:
-                try:
-                    loc = page.locator(sel)
-                    if loc.count() > 0:
-                        loc.first.click()
-                        r.add(f"🖱️ Clicado: {sel}")
-                        submetido = True
-                        break
-                except Exception:
-                    pass
-
-            if not submetido:
-                r.add("⚠️ Botão de submit não encontrado — tentando Enter.")
-                try:
-                    page.keyboard.press("Enter")
-                except Exception:
-                    pass
-
-            page.wait_for_load_state("networkidle", timeout=15000)
-            r.add(f"🔄 Após submit — URL: {page.url} | Título: {page.title()!r}")
-
-            # ── Extrai HTML e parse ────────────────────────────────────────
-            html = page.content().encode("utf-8")
-            preview = page.locator("body").inner_text()[:400].replace("\n", " ")
-            r.add(f"📄 Prévia: {preview!r}")
-
-            itens = _extrair_tabela_html(html)
-            r.add(f"📦 {len(itens)} itens extraídos.")
-
-            if itens:
-                r.itens = itens
-                r.url_usada = page.url
-
+            det = _detalhe_item(s, compra_id, it["item_id"])
+            resultados.append({
+                "numero_item":     it["numero"],
+                "descricao":       det["descricao_det"] or it["descricao"],
+                "und":             det["und"],
+                "valor_unit_num":  det["valor_unit_num"],
+                "valor_unit":      det["valor_unit"],
+                "fornecedor":      det["fornecedor"],
+                "cnpj":            det["cnpj"],
+                "vigencia_inicio": det["vigencia_inicio"],
+                "vigencia_fim":    det["vigencia_fim"],
+            })
         except Exception as e:
-            r.add(f"❌ Erro: {e}")
-        finally:
-            browser.close()
+            logger.warning("Erro no detalhe item %s: %s", it["numero"], e)
+            resultados.append({
+                "numero_item":     it["numero"],
+                "descricao":       it["descricao"],
+                "und":             "UN",
+                "valor_unit_num":  0.0,
+                "valor_unit":      "R$ 0,00",
+                "fornecedor":      "",
+                "cnpj":            "",
+                "vigencia_inicio": "",
+                "vigencia_fim":    "",
+            })
 
+    r.itens = resultados
+    r.add(f"🎯 Concluído: {len(resultados)} itens com detalhes.")
     return r
