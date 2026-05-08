@@ -22,25 +22,28 @@ _HEADERS = {
 def _normalizar_pregao(num: str) -> str:
     """
     Normaliza o número do pregão para o formato comprasnet: AAAANNNNN
-    Aceita: "90005", "90005/2024", "2024/90005", "PE 90005/2024", "52024", etc.
+    Aceita: "90008/2025", "2025/90008", "90008", "PE 90008/2025".
+    Usa (20\\d{2}) para não capturar subcadeias acidentais como "0008".
     """
     import datetime
     ano_atual = str(datetime.date.today().year)
 
+    # Remove prefixos textuais ("PE ", "Pregão ", etc.)
     num = re.sub(r"^[A-Za-z\s]+", "", num).strip()
 
-    m = re.search(r"(\d{4})[/\-](\d+)", num)
+    # "SEQUENCIAL/ANO" — ex: "90008/2025"
+    m = re.search(r"(\d+)[/\-](20\d{2})$", num)
     if m:
-        ano, seq = m.group(1), m.group(2)
-    else:
-        m2 = re.search(r"(\d+)[/\-](\d{4})", num)
-        if m2:
-            seq, ano = m2.group(1), m2.group(2)
-        else:
-            seq = re.sub(r"\D", "", num)
-            ano = ano_atual
+        return m.group(2) + m.group(1).zfill(5)
 
-    return ano + seq.zfill(5)
+    # "ANO/SEQUENCIAL" — ex: "2025/90008"
+    m = re.search(r"^(20\d{2})[/\-](\d+)", num)
+    if m:
+        return m.group(1) + m.group(2).zfill(5)
+
+    # Só número — assume ano atual
+    seq = re.sub(r"\D", "", num)
+    return ano_atual + seq.zfill(5)
 
 
 def _fmt(v: float) -> str:
@@ -59,15 +62,28 @@ def _parse_br(texto: str) -> float:
         return 0.0
 
 
-def _urls_pregao(uasg: str, num_norm: str) -> list[tuple[str, str]]:
-    """Retorna lista de (label, url) a tentar."""
+_BASE = "https://www.comprasnet.gov.br"
+
+
+def _tentativas_pregao(uasg: str, num_norm: str) -> list[dict]:
+    """
+    Retorna lista de tentativas: cada item tem 'label', 'method', 'url', 'data'.
+    Testa GET e POST porque o comprasnet às vezes exige POST para buscar.
+    """
+    ata_url    = f"{_BASE}/livre/pregao/ata0.asp"
+    multi_url  = f"{_BASE}/livre/pregao/result_multif0.asp"
+    form_data  = {
+        "co_no_uasg": uasg,
+        "numprp":     num_norm,
+        "radio_tipo_pregao": "1",   # 1 = Pregão Eletrônico
+        "b":          "OK",
+    }
     return [
-        ("ATA (ata0.asp)",
-         f"https://www.comprasnet.gov.br/livre/pregao/ata0.asp"
-         f"?co_no_uasg={uasg}&numprp={num_norm}"),
-        ("Resultado multifornecedor (result_multif0.asp)",
-         f"https://www.comprasnet.gov.br/livre/pregao/result_multif0.asp"
-         f"?co_no_uasg={uasg}&numprp={num_norm}"),
+        {"label": "ATA — POST",  "method": "POST", "url": ata_url,   "data": form_data},
+        {"label": "ATA — GET",   "method": "GET",  "url": ata_url,
+         "data": None, "params": {"co_no_uasg": uasg, "numprp": num_norm}},
+        {"label": "Multi — GET", "method": "GET",  "url": multi_url,
+         "data": None, "params": {"co_no_uasg": uasg, "numprp": num_norm}},
     ]
 
 
@@ -180,10 +196,15 @@ def buscar_itens_pregao(uasg: str, num_pregao: str) -> ResultadoBusca:
     r.add_log(f"📥 Entrada: UASG={uasg} | Pregão digitado='{num_pregao}'")
     r.add_log(f"🔢 Normalizado para comprasnet: '{num_norm}' (formato AAAANNNNN)")
 
-    for label, url in _urls_pregao(uasg, num_norm):
-        r.add_log(f"🌐 Tentando [{label}]: {url}")
+    for t in _tentativas_pregao(uasg, num_norm):
+        label = t["label"]
+        url   = t["url"]
+        r.add_log(f"🌐 [{label}]: {url}")
         try:
-            resp = requests.get(url, headers=_HEADERS, timeout=30, verify=False)
+            if t["method"] == "POST":
+                resp = requests.post(url, data=t["data"], headers=_HEADERS, timeout=30, verify=False)
+            else:
+                resp = requests.get(url, params=t.get("params"), headers=_HEADERS, timeout=30, verify=False)
             r.add_log(f"   → HTTP {resp.status_code} | {len(resp.content)} bytes | "
                       f"encoding: {resp.encoding}")
 
