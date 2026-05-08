@@ -35,23 +35,28 @@ SESSION_FILE = _session_file()
 # ── Sessão autenticada ─────────────────────────────────────────────────────────
 
 def _carregar_cookies() -> list:
-    """Carrega cookies do session.json (arquivo ou Streamlit secrets)."""
+    """Carrega cookies do session.json (arquivo local ou Streamlit secrets)."""
     import json
 
-    # 1. Tenta arquivo local
+    # 1. Arquivo local
     if os.path.exists(SESSION_FILE):
+        logger.info("Sessão carregada do arquivo: %s", SESSION_FILE)
         with open(SESSION_FILE) as f:
             return json.load(f).get("cookies", [])
 
-    # 2. Tenta Streamlit secrets
+    # 2. Streamlit secrets
     try:
         import streamlit as st
-        raw = st.secrets.get("session_json", "")
+        raw = st.secrets["session_json"]
         if raw:
+            logger.info("Sessão carregada dos Streamlit secrets.")
             return json.loads(raw).get("cookies", [])
-    except Exception:
-        pass
+    except KeyError:
+        logger.warning("'session_json' não encontrado nos Streamlit secrets.")
+    except Exception as e:
+        logger.warning("Erro ao ler Streamlit secrets: %s", e)
 
+    logger.error("Nenhuma sessão encontrada (arquivo nem secrets).")
     return []
 
 
