@@ -1107,8 +1107,11 @@ def page_gerar_req(reqs, ncs):
         om   = c9.text_input("OM",  value=nc_d.get("OM", OM_PADRAO))
 
         c10, c11 = st.columns(2)
-        fornecedor = c10.text_input("Fornecedor (Razão Social)", value=_v("EMPRESA"))
-        cnpj_raw   = c11.text_input("CNPJ", placeholder="00.000.000/0000-00")
+        _fp = st.session_state.get("_forn_pesq") or {}
+        fornecedor = c10.text_input("Fornecedor (Razão Social)",
+                                    value=_fp.get("fornecedor") or _v("EMPRESA"))
+        cnpj_raw   = c11.text_input("CNPJ", placeholder="00.000.000/0000-00",
+                                    value=_fp.get("cnpj", ""))
         cnpj       = _formatar_cnpj(cnpj_raw)
 
         assunto      = st.text_input("Assunto", value=_v("FINALIDADE", "FINALIDADE"))
@@ -1196,54 +1199,85 @@ def page_gerar_req(reqs, ncs):
             st.success(f"✅ {len(resultados_pesq)} item(ns) encontrado(s).")
             if url_exib:
                 st.caption(f"🔗 Fonte: `{url_exib}`")
-            for i, res in enumerate(resultados_pesq):
-                with st.expander(
-                    f"**{i+1}.** {res['descricao'][:70]} | {res['valor_unit']} | {res['fornecedor'][:40]}",
-                    expanded=(i == 0)
-                ):
-                    c_r1, c_r2, c_r3 = st.columns(3)
-                    c_r1.markdown(f"**Item:** {res.get('numero_item', '')}")
-                    c_r1.markdown(f"**Vigência:** {res.get('vigencia_inicio','')} a {res.get('vigencia_fim','')}")
-                    c_r2.markdown(f"**Fornecedor:** {res.get('fornecedor', '')}")
-                    c_r2.markdown(f"**CNPJ:** {res.get('cnpj', '')}")
-                    c_r3.markdown(f"**Valor Unit.:** {res.get('valor_unit', '')}")
-                    c_r3.markdown(f"**Unid.:** {res.get('und', '')}")
 
-                    if st.button(f"✅ Usar este item", key=f"usar_{i}"):
-                        st.session_state["_item_prefill"] = res
-                        # Pré-preenche campos do formulário
-                        if res.get("fornecedor") and not st.session_state.get("campos_req", {}).get("FORNECEDOR_NOME"):
-                            st.session_state.setdefault("campos_req", {})["FORNECEDOR_NOME"] = res["fornecedor"]
-                            st.session_state["campos_req"]["FORNECEDOR_CNPJ"] = res["cnpj"]
-                        if res.get("vigencia_fim"):
-                            st.session_state.setdefault("campos_req", {})["VIGENCIA_DA_ATA"] = res["vigencia_fim"]
-                        st.info("Dados pré-carregados. Preencha Item/Sub-item e confirme abaixo ↓")
+            # Agrupa por fornecedor
+            from collections import OrderedDict
+            grupos: dict = OrderedDict()
+            for res in resultados_pesq:
+                forn = res.get("fornecedor", "") or "Sem fornecedor"
+                grupos.setdefault(forn, []).append(res)
+
+            for forn, itens_forn in grupos.items():
+                cnpj_forn = itens_forn[0].get("cnpj", "")
+                vig_fim   = itens_forn[0].get("vigencia_fim", "")
+                with st.expander(f"🏢 **{forn}** | {cnpj_forn}", expanded=True):
+                    # Tabela de itens do fornecedor
+                    for res in itens_forn:
+                        ca, cb, cc, cd, ce = st.columns([1, 5, 2, 2, 2])
+                        ca.markdown(f"**{res.get('numero_item','')}**")
+                        cb.markdown(res.get("descricao", "")[:80])
+                        cc.markdown(res.get("und", ""))
+                        cd.markdown(res.get("valor_unit", ""))
+                        if ce.button("➕ Usar", key=f"usar_{forn}_{res.get('numero_item','')}"):
+                            st.session_state["_fi_desc"]  = res.get("descricao", "")
+                            st.session_state["_fi_und"]   = res.get("und", "UN") or "UN"
+                            st.session_state["_fi_vunit"] = float(res.get("valor_unit_num", 0.0))
+                            st.session_state["_fi_item"]  = res.get("numero_item", "")
+                            st.session_state["_forn_pesq"] = {
+                                "fornecedor": forn,
+                                "cnpj":       cnpj_forn,
+                                "vigencia_fim": vig_fim,
+                            }
+                            st.rerun()
+
+                    st.divider()
+                    # Botão para usar TODOS os itens deste fornecedor de uma vez
+                    if st.button(f"✅ Adicionar todos os itens de **{forn[:40]}**",
+                                 key=f"usar_todos_{forn}"):
+                        for res in itens_forn:
+                            v = float(res.get("valor_unit_num", 0.0))
+                            st.session_state.req_itens.append({
+                                "ORD":            str(len(st.session_state.req_itens) + 1),
+                                "ITEM":           res.get("numero_item", ""),
+                                "SI":             "",
+                                "DESCRICAO_ITEM": res.get("descricao", ""),
+                                "UND":            res.get("und", "UN") or "UN",
+                                "QTD":            "1,000",
+                                "VALOR_UNIT":     fmt(v),
+                                "VALOR_TOTAL":    fmt(v),
+                                "_total":         v,
+                            })
+                        # Preenche fornecedor/CNPJ/vigência no formulário principal
+                        st.session_state["_forn_pesq"] = {
+                            "fornecedor": forn,
+                            "cnpj":       cnpj_forn,
+                            "vigencia_fim": vig_fim,
+                        }
+                        st.rerun()
 
     # ── 2. Itens
     st.divider()
     st.subheader("2. Itens da Requisição")
 
-    # Pré-preenchimento do item se veio da pesquisa
-    prefill = st.session_state.pop("_item_prefill", None)
-    if prefill:
-        st.info(f"🔄 Dados carregados da pesquisa: **{prefill['descricao'][:60]}** · {prefill['valor_unit']}")
-        st.session_state["_desc_prefill"]  = prefill.get("descricao", "")
-        st.session_state["_und_prefill"]   = prefill.get("und", "UN")
-        st.session_state["_vunit_prefill"] = prefill.get("valor_unit_num", 0.0)
+    # Aplica dados do fornecedor pesquisado no Step 1
+    forn_pesq = st.session_state.pop("_forn_pesq", None)
+    if forn_pesq:
+        st.success(f"🏢 Fornecedor carregado: **{forn_pesq['fornecedor']}** | {forn_pesq['cnpj']}")
+
+    # Inicializa chaves do formulário se não existirem
+    for k, v in [("_fi_item",""), ("_fi_desc",""), ("_fi_und","UN"), ("_fi_vunit", 0.0)]:
+        st.session_state.setdefault(k, v)
 
     with st.form("f_add_item", clear_on_submit=True):
         ci1, ci2, ci3 = st.columns([1, 1, 5])
-        item  = ci1.text_input("Item *",    placeholder="ex: 42",  help="Nº do item no pregão")
-        si    = ci2.text_input("Sub-item",  placeholder="ex: 1",   help="Nº do sub-item (se houver)")
-        desc  = ci3.text_input("Descrição do Item *",
-                               value=st.session_state.pop("_desc_prefill", ""))
+        item  = ci1.text_input("Item *",   key="_fi_item",  help="Nº do item no pregão")
+        si    = ci2.text_input("Sub-item", placeholder="ex: 1", help="Nº do sub-item (se houver)")
+        desc  = ci3.text_input("Descrição do Item *", key="_fi_desc")
         ci4, ci5, ci6 = st.columns([1, 1, 2])
-        und   = ci4.text_input("Unid.", value=st.session_state.pop("_und_prefill", "UN"))
+        und   = ci4.text_input("Unid.", key="_fi_und")
         qtd   = ci5.number_input("Qtd", min_value=0.001, value=1.0, step=1.0, format="%.3f")
-        vunit = ci6.number_input("Valor Unit. (R$)",
-                                 min_value=0.0,
-                                 value=float(st.session_state.pop("_vunit_prefill", 0.0)),
-                                 step=0.01, format="%.2f")
+        vunit = ci6.number_input("Valor Unit. (R$)", key="_fi_vunit",
+                                 min_value=0.0, step=0.01, format="%.2f")
         add   = st.form_submit_button("➕ Adicionar Item", use_container_width=True)
 
     if add:
