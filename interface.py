@@ -1088,6 +1088,18 @@ def page_gerar_req(reqs, ncs):
                     st.cache_data.clear()
                     st.rerun()
 
+    # ── Inicializa chaves do Step 1 com dados da NC (apenas na primeira vez ou troca de NC)
+    _nc_chave = f"_sq1_nc_{nc_sel}"
+    if _nc_chave not in st.session_state:
+        for k in [k for k in st.session_state if k.startswith("_sq1_nc_")]:
+            del st.session_state[k]
+        st.session_state["sq1_fornecedor"] = _v("EMPRESA")
+        st.session_state["sq1_cnpj"]       = ""
+        st.session_state["sq1_num_pregao"] = ""
+        st.session_state["sq1_vigencia"]   = nc_d.get("PRAZO", "")
+        st.session_state["sq1_ug_modal"]   = nc_d.get("UG", UG_PADRAO)
+        st.session_state[_nc_chave]        = True
+
     # ── Form com campos
     with st.form("f_campos_req"):
         c1, c2, c3 = st.columns(3)
@@ -1107,20 +1119,17 @@ def page_gerar_req(reqs, ncs):
         om   = c9.text_input("OM",  value=nc_d.get("OM", OM_PADRAO))
 
         c10, c11 = st.columns(2)
-        _fp = st.session_state.get("_forn_pesq") or {}
-        fornecedor = c10.text_input("Fornecedor (Razão Social)",
-                                    value=_fp.get("fornecedor") or _v("EMPRESA"))
-        cnpj_raw   = c11.text_input("CNPJ", placeholder="00.000.000/0000-00",
-                                    value=_fp.get("cnpj", ""))
+        fornecedor = c10.text_input("Fornecedor (Razão Social)", key="sq1_fornecedor")
+        cnpj_raw   = c11.text_input("CNPJ", placeholder="00.000.000/0000-00", key="sq1_cnpj")
         cnpj       = _formatar_cnpj(cnpj_raw)
 
         assunto      = st.text_input("Assunto", value=_v("FINALIDADE", "FINALIDADE"))
 
         cm1, cm2, cm3, cm4 = st.columns([2, 2, 1, 2])
         tipo_modal   = cm1.selectbox("Modalidade", ["PREGÃO", "CARONA", "DISPENSA", "INEXIGIBILIDADE", "SUPRIMENTO DE FUNDOS"])
-        num_pregao   = cm2.text_input("Nº Pregão/ARP", placeholder="90005/2026")
-        ug_modal     = cm3.text_input("UG", value=nc_d.get("UG", UG_PADRAO), key="ug_modal")
-        vigencia_ata = cm4.text_input("Vigência da ATA", value=nc_d.get("PRAZO", ""))
+        num_pregao   = cm2.text_input("Nº Pregão/ARP",  key="sq1_num_pregao")
+        ug_modal     = cm3.text_input("UG",             key="sq1_ug_modal")
+        vigencia_ata = cm4.text_input("Vigência da ATA", key="sq1_vigencia")
         modalidade   = f"{tipo_modal} - {num_pregao} {ug_modal}".strip(" -")
         intro        = st.text_area("Introdução (INTRO_1)", value=st.session_state.get("_intro_txt", ""))
         justificativa = st.text_area("Justificativa",        value=st.session_state.get("_just_txt", ""))
@@ -1219,15 +1228,25 @@ def page_gerar_req(reqs, ncs):
                         cc.markdown(res.get("und", ""))
                         cd.markdown(res.get("valor_unit", ""))
                         if ce.button("➕ Usar", key=f"usar_{forn}_{res.get('numero_item','')}"):
-                            st.session_state["_fi_desc"]  = res.get("descricao", "")
-                            st.session_state["_fi_und"]   = res.get("und", "UN") or "UN"
-                            st.session_state["_fi_vunit"] = float(res.get("valor_unit_num", 0.0))
-                            st.session_state["_fi_item"]  = res.get("numero_item", "")
-                            st.session_state["_forn_pesq"] = {
-                                "fornecedor": forn,
-                                "cnpj":       cnpj_forn,
-                                "vigencia_fim": vig_fim,
-                            }
+                            # Adiciona item ao Step 2
+                            v = float(res.get("valor_unit_num", 0.0))
+                            st.session_state.req_itens.append({
+                                "ORD":            str(len(st.session_state.req_itens) + 1),
+                                "ITEM":           res.get("numero_item", ""),
+                                "SI":             "",
+                                "DESCRICAO_ITEM": res.get("descricao", ""),
+                                "UND":            res.get("und", "UN") or "UN",
+                                "QTD":            "1,000",
+                                "VALOR_UNIT":     fmt(v),
+                                "VALOR_TOTAL":    fmt(v),
+                                "_total":         v,
+                            })
+                            # Preenche Step 1 via session state
+                            st.session_state["sq1_fornecedor"] = forn
+                            st.session_state["sq1_cnpj"]       = cnpj_forn
+                            st.session_state["sq1_num_pregao"] = st.session_state.get("pesq_pregao", "")
+                            st.session_state["sq1_ug_modal"]   = st.session_state.get("pesq_uasg", UG_PADRAO)
+                            st.session_state["sq1_vigencia"]   = vig_fim
                             st.rerun()
 
                     st.divider()
@@ -1247,24 +1266,19 @@ def page_gerar_req(reqs, ncs):
                                 "VALOR_TOTAL":    fmt(v),
                                 "_total":         v,
                             })
-                        # Preenche fornecedor/CNPJ/vigência no formulário principal
-                        st.session_state["_forn_pesq"] = {
-                            "fornecedor": forn,
-                            "cnpj":       cnpj_forn,
-                            "vigencia_fim": vig_fim,
-                        }
+                        # Preenche Step 1
+                        st.session_state["sq1_fornecedor"] = forn
+                        st.session_state["sq1_cnpj"]       = cnpj_forn
+                        st.session_state["sq1_num_pregao"] = st.session_state.get("pesq_pregao", "")
+                        st.session_state["sq1_ug_modal"]   = st.session_state.get("pesq_uasg", UG_PADRAO)
+                        st.session_state["sq1_vigencia"]   = vig_fim
                         st.rerun()
 
     # ── 2. Itens
     st.divider()
     st.subheader("2. Itens da Requisição")
 
-    # Aplica dados do fornecedor pesquisado no Step 1
-    forn_pesq = st.session_state.pop("_forn_pesq", None)
-    if forn_pesq:
-        st.success(f"🏢 Fornecedor carregado: **{forn_pesq['fornecedor']}** | {forn_pesq['cnpj']}")
-
-    # Inicializa chaves do formulário se não existirem
+    # Inicializa chaves do formulário de item se não existirem
     for k, v in [("_fi_item",""), ("_fi_desc",""), ("_fi_und","UN"), ("_fi_vunit", 0.0)]:
         st.session_state.setdefault(k, v)
 
