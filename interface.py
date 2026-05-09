@@ -1202,12 +1202,12 @@ def page_gerar_req(reqs, ncs):
                     expanded=(i == 0)
                 ):
                     c_r1, c_r2, c_r3 = st.columns(3)
-                    c_r1.markdown(f"**ATA:** {res['numero_ata']}")
-                    c_r1.markdown(f"**Item:** {res['numero_item']}")
-                    c_r2.markdown(f"**Fornecedor:** {res['fornecedor']}")
-                    c_r2.markdown(f"**CNPJ:** {res['cnpj']}")
-                    c_r3.markdown(f"**Valor Unit.:** {res['valor_unit']}")
-                    c_r3.markdown(f"**Vigência:** {res['vigencia_inicio']} a {res['vigencia_fim']}")
+                    c_r1.markdown(f"**Item:** {res.get('numero_item', '')}")
+                    c_r1.markdown(f"**Vigência:** {res.get('vigencia_inicio','')} a {res.get('vigencia_fim','')}")
+                    c_r2.markdown(f"**Fornecedor:** {res.get('fornecedor', '')}")
+                    c_r2.markdown(f"**CNPJ:** {res.get('cnpj', '')}")
+                    c_r3.markdown(f"**Valor Unit.:** {res.get('valor_unit', '')}")
+                    c_r3.markdown(f"**Unid.:** {res.get('und', '')}")
 
                     if st.button(f"✅ Usar este item", key=f"usar_{i}"):
                         st.session_state["_item_prefill"] = res
