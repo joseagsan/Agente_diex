@@ -1088,24 +1088,13 @@ def page_gerar_req(reqs, ncs):
                     st.cache_data.clear()
                     st.rerun()
 
-    # ── Inicializa chaves do Step 1 com dados da NC (apenas na primeira vez ou troca de NC)
-    _nc_chave = f"_sq1_nc_{nc_sel}"
-    if _nc_chave not in st.session_state:
-        for k in [k for k in st.session_state if k.startswith("_sq1_nc_")]:
-            del st.session_state[k]
-        st.session_state["sq1_fornecedor"] = _v("EMPRESA")
-        st.session_state["sq1_cnpj"]       = ""
-        st.session_state["sq1_num_pregao"] = ""
-        st.session_state["sq1_vigencia"]   = nc_d.get("PRAZO", "")
-        st.session_state["sq1_ug_modal"]   = nc_d.get("UG", UG_PADRAO)
-        st.session_state[_nc_chave]        = True
-
-    # ── Form com campos
+    # ── Bloco 1: Dados manuais (NC, req#, data, assunto, intro, just)
+    st.subheader("1. Dados da Requisição")
     with st.form("f_campos_req"):
         c1, c2, c3 = st.columns(3)
-        req_id   = c1.text_input("Nº Requisição",         value=_v("REQ"))
-        data_req = c2.date_input("Data",                   value=date.today())
-        ne       = c3.text_input("NE (Nota de Empenho)",  value=_v("NE"))
+        req_id   = c1.text_input("Nº Requisição",        value=_v("REQ"))
+        data_req = c2.date_input("Data",                  value=date.today())
+        ne       = c3.text_input("NE (Nota de Empenho)", value=_v("NE"))
 
         c4, c5, c6 = st.columns(3)
         pi    = c4.text_input("PI",    value=_v("PI", "PI"))
@@ -1115,61 +1104,38 @@ def page_gerar_req(reqs, ncs):
         c7, c8, c9 = st.columns(3)
         tipo = c7.selectbox("Tipo", ["Ordinário", "Especial", "Suprimento de Fundos"],
                              index=0 if _v("TIPO") != "Especial" else 1)
-        ug   = c8.text_input("UG",  value=nc_d.get("UG", UG_PADRAO))
-        om   = c9.text_input("OM",  value=nc_d.get("OM", OM_PADRAO))
-
-        c10, c11 = st.columns(2)
-        fornecedor = c10.text_input("Fornecedor (Razão Social)", key="sq1_fornecedor")
-        cnpj_raw   = c11.text_input("CNPJ", placeholder="00.000.000/0000-00", key="sq1_cnpj")
-        cnpj       = _formatar_cnpj(cnpj_raw)
+        ug   = c8.text_input("UG", value=nc_d.get("UG", UG_PADRAO))
+        om   = c9.text_input("OM", value=nc_d.get("OM", OM_PADRAO))
 
         assunto      = st.text_input("Assunto", value=_v("FINALIDADE", "FINALIDADE"))
+        intro        = st.text_area("Introdução",  value=st.session_state.get("_intro_txt", ""), height=80)
+        justificativa = st.text_area("Justificativa", value=st.session_state.get("_just_txt", ""), height=80)
+        finalidade   = st.text_area("Finalidade / Objeto", value=_v("FINALIDADE", "FINALIDADE"), height=60)
 
-        cm1, cm2, cm3, cm4 = st.columns([2, 2, 1, 2])
-        tipo_modal   = cm1.selectbox("Modalidade", ["PREGÃO", "CARONA", "DISPENSA", "INEXIGIBILIDADE", "SUPRIMENTO DE FUNDOS"])
-        num_pregao   = cm2.text_input("Nº Pregão/ARP",  key="sq1_num_pregao")
-        ug_modal     = cm3.text_input("UG",             key="sq1_ug_modal")
-        vigencia_ata = cm4.text_input("Vigência da ATA", key="sq1_vigencia")
-        modalidade   = f"{tipo_modal} - {num_pregao} {ug_modal}".strip(" -")
-        intro        = st.text_area("Introdução (INTRO_1)", value=st.session_state.get("_intro_txt", ""))
-        justificativa = st.text_area("Justificativa",        value=st.session_state.get("_just_txt", ""))
-        finalidade   = st.text_area("Finalidade / Objeto", value=_v("FINALIDADE", "FINALIDADE"))
+        salvar_basico = st.form_submit_button("✅ Confirmar Dados Básicos", type="primary", use_container_width=True)
 
-        salvar = st.form_submit_button("✅ Confirmar Dados", type="primary", use_container_width=True)
-
-    if salvar:
+    if salvar_basico:
         _MESES = {1:"janeiro",2:"fevereiro",3:"março",4:"abril",5:"maio",6:"junho",
                   7:"julho",8:"agosto",9:"setembro",10:"outubro",11:"novembro",12:"dezembro"}
         local_data = f"Boa Vista/RR, {data_req.day} de {_MESES[data_req.month]} de {data_req.year}"
         dados_nc   = f"{nc_sel} de {nc_d.get('DATA NC','')}" if nc_sel else ""
-
         st.session_state.campos_req = {
-            "requisition_id":  req_id,
-            "LOCAL_DATA":      local_data,
-            "DADOS_NC":        dados_nc,
-            "NE":              ne,
-            "PI":              pi,
-            "ND":              nd,
-            "PTRES":           ptres,
-            "TIPO":            tipo,
-            "FORNECEDOR_NOME": fornecedor,
-            "FORNECEDOR_CNPJ": cnpj,
-            "UG":              ug,
-            "OM":              om,
-            "ASSUNTO":         assunto,
-            "MODALIDADE":      modalidade,
-            "INTRO_1":         intro,
-            "JUSTIFICATIVA":   justificativa,
-            "VIGENCIA_DA_ATA": vigencia_ata,
-            "FINALIDADE":      finalidade,
+            "requisition_id": req_id,
+            "LOCAL_DATA":     local_data,
+            "DADOS_NC":       dados_nc,
+            "NE":             ne,
+            "PI":             pi,
+            "ND":             nd,
+            "PTRES":          ptres,
+            "TIPO":           tipo,
+            "UG":             ug,
+            "OM":             om,
+            "ASSUNTO":        assunto,
+            "INTRO_1":        intro,
+            "JUSTIFICATIVA":  justificativa,
+            "FINALIDADE":     finalidade,
         }
-        st.success("✅ Dados confirmados. Adicione os itens abaixo.")
-
-    if st.session_state.get("campos_req"):
-        with st.expander("📋 Dados confirmados", expanded=False):
-            for k, v in st.session_state.campos_req.items():
-                if k != "requisition_id":
-                    st.text(f"{k}: {v}")
+        st.success("✅ Dados básicos confirmados.")
 
     # ── Pesquisa no portal
     st.divider()
@@ -1274,9 +1240,34 @@ def page_gerar_req(reqs, ncs):
                         st.session_state["sq1_vigencia"]   = vig_fim
                         st.rerun()
 
-    # ── 2. Itens
+    # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
-    st.subheader("2. Itens da Requisição")
+    st.subheader("2. Fornecedor / Pregão")
+    st.caption("Preenchido automaticamente ao clicar ➕ Usar — editável se necessário.")
+
+    # Inicializa chaves se ainda não existem
+    st.session_state.setdefault("sq1_fornecedor", "")
+    st.session_state.setdefault("sq1_cnpj",       "")
+    st.session_state.setdefault("sq1_num_pregao", "")
+    st.session_state.setdefault("sq1_ug_modal",   UG_PADRAO)
+    st.session_state.setdefault("sq1_vigencia",   "")
+    st.session_state.setdefault("sq1_tipo_modal", "PREGÃO")
+
+    b2_c1, b2_c2 = st.columns(2)
+    b2_c1.text_input("Fornecedor (Razão Social)", key="sq1_fornecedor")
+    b2_c2.text_input("CNPJ", placeholder="00.000.000/0000-00", key="sq1_cnpj")
+
+    b2_m1, b2_m2, b2_m3, b2_m4 = st.columns([2, 2, 1, 2])
+    b2_m1.selectbox("Modalidade",
+                    ["PREGÃO", "CARONA", "DISPENSA", "INEXIGIBILIDADE", "SUPRIMENTO DE FUNDOS"],
+                    key="sq1_tipo_modal")
+    b2_m2.text_input("Nº Pregão/ARP",  key="sq1_num_pregao")
+    b2_m3.text_input("UG",             key="sq1_ug_modal")
+    b2_m4.text_input("Vigência da ATA", key="sq1_vigencia")
+
+    # ── 3. Itens
+    st.divider()
+    st.subheader("3. Itens da Requisição")
 
     # Inicializa chaves do formulário de item se não existirem
     for k, v in [("_fi_item",""), ("_fi_desc",""), ("_fi_und","UN"), ("_fi_vunit", 0.0)]:
@@ -1329,26 +1320,40 @@ def page_gerar_req(reqs, ncs):
     else:
         st.info("Nenhum item adicionado ainda.")
 
-    # ── 3. Gerar
+    # ── 4. Gerar
     st.divider()
-    st.subheader("3. Gerar Documento")
+    st.subheader("4. Gerar Documento")
 
     if st.button("📄 Gerar DOCX", type="primary"):
         campos = st.session_state.get("campos_req", {})
         itens  = st.session_state.req_itens
 
         if not campos:
-            st.error("Confirme os dados do documento primeiro (Passo 1).")
+            st.error("Confirme os dados básicos primeiro (Bloco 1).")
         elif not itens:
-            st.error("Adicione pelo menos um item (Passo 2).")
+            st.error("Adicione pelo menos um item (Bloco 3).")
         else:
             try:
                 from gerador import gerar_para_bytes
-                total_geral   = sum(i["_total"] for i in itens)
-                campos_finais = {**campos, "TOTAL": fmt(total_geral)}
-                itens_limpos  = [{k: v for k, v in i.items() if not k.startswith("_")} for i in itens]
-                doc_bytes     = gerar_para_bytes(TEMPLATE_PATH, campos_finais, itens_limpos)
-                nome_arq      = f"REQ_{campos.get('requisition_id', 'doc')}.docx"
+
+                # Monta modalidade a partir do Bloco 2
+                mod_tipo = st.session_state.get("sq1_tipo_modal", "PREGÃO")
+                mod_num  = st.session_state.get("sq1_num_pregao", "")
+                mod_ug   = st.session_state.get("sq1_ug_modal", "")
+                modalidade = f"{mod_tipo} - {mod_num} {mod_ug}".strip(" -")
+
+                total_geral = sum(i["_total"] for i in itens)
+                campos_finais = {
+                    **campos,
+                    "FORNECEDOR_NOME": st.session_state.get("sq1_fornecedor", ""),
+                    "FORNECEDOR_CNPJ": _formatar_cnpj(st.session_state.get("sq1_cnpj", "")),
+                    "MODALIDADE":      modalidade,
+                    "VIGENCIA_DA_ATA": st.session_state.get("sq1_vigencia", ""),
+                    "TOTAL":           fmt(total_geral),
+                }
+                itens_limpos = [{k: v for k, v in i.items() if not k.startswith("_")} for i in itens]
+                doc_bytes    = gerar_para_bytes(TEMPLATE_PATH, campos_finais, itens_limpos)
+                nome_arq     = f"REQ_{campos.get('requisition_id', 'doc')}.docx"
                 st.download_button(
                     "⬇️ Baixar Documento",
                     data=doc_bytes,
