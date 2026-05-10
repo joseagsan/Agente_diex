@@ -1182,19 +1182,18 @@ def page_gerar_req(reqs, ncs):
                 forn = res.get("fornecedor", "") or "Sem fornecedor"
                 grupos.setdefault(forn, []).append(res)
 
-            for forn, itens_forn in grupos.items():
+            for gi, (forn, itens_forn) in enumerate(grupos.items()):
                 cnpj_forn = itens_forn[0].get("cnpj", "")
                 vig_fim   = itens_forn[0].get("vigencia_fim", "")
                 with st.expander(f"🏢 **{forn}** | {cnpj_forn}", expanded=True):
-                    # Tabela de itens do fornecedor
-                    for res in itens_forn:
+                    for ii, res in enumerate(itens_forn):
                         ca, cb, cc, cd, ce = st.columns([1, 5, 2, 2, 2])
                         ca.markdown(f"**{res.get('numero_item','')}**")
                         cb.markdown(res.get("descricao", "")[:80])
                         cc.markdown(res.get("und", ""))
                         cd.markdown(res.get("valor_unit", ""))
-                        if ce.button("➕ Usar", key=f"usar_{forn}_{res.get('numero_item','')}"):
-                            # Adiciona item ao Step 2
+                        # Chave numérica para evitar problemas com chars especiais
+                        if ce.button("➕ Usar", key=f"usar_{gi}_{ii}"):
                             v = float(res.get("valor_unit_num", 0.0))
                             st.session_state.req_itens.append({
                                 "ORD":            str(len(st.session_state.req_itens) + 1),
@@ -1207,18 +1206,18 @@ def page_gerar_req(reqs, ncs):
                                 "VALOR_TOTAL":    fmt(v),
                                 "_total":         v,
                             })
-                            # Preenche Step 1 via session state
+                            # Preenche Bloco 2 via session state
+                            # (sem st.rerun() — o clique do botão já causa rerun)
                             st.session_state["sq1_fornecedor"] = forn
                             st.session_state["sq1_cnpj"]       = cnpj_forn
                             st.session_state["sq1_num_pregao"] = st.session_state.get("pesq_pregao", "")
                             st.session_state["sq1_ug_modal"]   = st.session_state.get("pesq_uasg", UG_PADRAO)
                             st.session_state["sq1_vigencia"]   = vig_fim
-                            st.rerun()
+                            st.toast(f"✅ Item {res.get('numero_item','')} adicionado!")
 
                     st.divider()
-                    # Botão para usar TODOS os itens deste fornecedor de uma vez
-                    if st.button(f"✅ Adicionar todos os itens de **{forn[:40]}**",
-                                 key=f"usar_todos_{forn}"):
+                    if st.button(f"✅ Usar TODOS os itens deste fornecedor",
+                                 key=f"usar_todos_{gi}"):
                         for res in itens_forn:
                             v = float(res.get("valor_unit_num", 0.0))
                             st.session_state.req_itens.append({
@@ -1232,13 +1231,12 @@ def page_gerar_req(reqs, ncs):
                                 "VALOR_TOTAL":    fmt(v),
                                 "_total":         v,
                             })
-                        # Preenche Step 1
                         st.session_state["sq1_fornecedor"] = forn
                         st.session_state["sq1_cnpj"]       = cnpj_forn
                         st.session_state["sq1_num_pregao"] = st.session_state.get("pesq_pregao", "")
                         st.session_state["sq1_ug_modal"]   = st.session_state.get("pesq_uasg", UG_PADRAO)
                         st.session_state["sq1_vigencia"]   = vig_fim
-                        st.rerun()
+                        st.toast(f"✅ {len(itens_forn)} itens adicionados!")
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
