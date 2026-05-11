@@ -345,37 +345,3 @@ def buscar_detalhe_item(compra_id: str, item_id: str) -> dict:
     s = _sessao()
     return _detalhe_item(s, compra_id, item_id)
 
-# ── código legado removido ──────────────────────────────────────────────────
-if False:
-    resultados = []
-    for it in itens_base:
-        try:
-            det = _detalhe_item(s, compra_id, it["item_id"])
-            resultados.append({
-                "numero_item":     it["numero"],
-                "descricao":       det["descricao_det"] or it["descricao"],
-                "und":             det["und"],
-                "valor_unit_num":  det["valor_unit_num"],
-                "valor_unit":      det["valor_unit"],
-                "fornecedor":      det["fornecedor"],
-                "cnpj":            det["cnpj"],
-                "vigencia_inicio": det["vigencia_inicio"],
-                "vigencia_fim":    det["vigencia_fim"],
-            })
-        except Exception as e:
-            logger.warning("Erro no detalhe item %s: %s", it["numero"], e)
-            resultados.append({
-                "numero_item":     it["numero"],
-                "descricao":       it["descricao"],
-                "und":             "UN",
-                "valor_unit_num":  0.0,
-                "valor_unit":      "R$ 0,00",
-                "fornecedor":      "",
-                "cnpj":            "",
-                "vigencia_inicio": "",
-                "vigencia_fim":    "",
-            })
-
-    r.itens = resultados
-    r.add(f"🎯 Concluído: {len(resultados)} itens com detalhes.")
-    return r
