@@ -31,10 +31,13 @@ COLUNAS_REQ = [
 
 
 def _conectar() -> gspread.Client:
+    import os, json
+
     # 1. Streamlit Cloud: secret [gcp_service_account]
     try:
         import streamlit as st
         if "gcp_service_account" in st.secrets:
+            logger.info("GCP via st.secrets")
             creds = Credentials.from_service_account_info(
                 dict(st.secrets["gcp_service_account"]), scopes=SCOPES
             )
@@ -42,32 +45,44 @@ def _conectar() -> gspread.Client:
     except Exception:
         pass
 
-    # 2. Railway: variável GCP_CREDENTIALS_JSON (JSON completo) ou campos individuais
-    import os, json
-    raw = os.getenv("GCP_CREDENTIALS_JSON", "")
+    # 2. Variável GCP_CREDENTIALS_JSON (JSON completo)
+    raw = os.getenv("GCP_CREDENTIALS_JSON", "").strip()
+    logger.info("GCP_CREDENTIALS_JSON: %d chars", len(raw))
     if raw:
-        creds = Credentials.from_service_account_info(json.loads(raw), scopes=SCOPES)
-        return gspread.authorize(creds)
+        try:
+            info = json.loads(raw)
+            creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+            logger.info("GCP autenticado via GCP_CREDENTIALS_JSON")
+            return gspread.authorize(creds)
+        except Exception as e:
+            logger.error("Erro GCP_CREDENTIALS_JSON: %s", e)
 
-    # 3. Railway: campos individuais (type, project_id, private_key, ...)
-    pk = os.getenv("private_key", "")
-    if pk:
-        info = {
-            "type":                        os.getenv("type", "service_account"),
-            "project_id":                  os.getenv("project_id", ""),
-            "private_key_id":              os.getenv("private_key_id", ""),
-            "private_key":                 pk.replace("\\n", "\n"),
-            "client_email":                os.getenv("client_email", ""),
-            "client_id":                   os.getenv("client_id", ""),
-            "auth_uri":                    os.getenv("auth_uri", "https://accounts.google.com/o/oauth2/auth"),
-            "token_uri":                   os.getenv("token_uri", "https://oauth2.googleapis.com/token"),
-            "auth_provider_x509_cert_url": os.getenv("auth_provider_x509_cert_url", ""),
-            "client_x509_cert_url":        os.getenv("client_x509_cert_url", ""),
-        }
-        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-        return gspread.authorize(creds)
+    # 3. Campos individuais (private_key, client_email, ...)
+    pk = os.getenv("private_key", "").strip()
+    ce = os.getenv("client_email", "").strip()
+    logger.info("Campos individuais: pk=%s ce=%s", bool(pk), bool(ce))
+    if pk and ce:
+        try:
+            info = {
+                "type": "service_account",
+                "project_id":                  os.getenv("project_id", ""),
+                "private_key_id":              os.getenv("private_key_id", ""),
+                "private_key":                 pk.replace("\\n", "\n"),
+                "client_email":                ce,
+                "client_id":                   os.getenv("client_id", ""),
+                "auth_uri":                    "https://accounts.google.com/o/oauth2/auth",
+                "token_uri":                   "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "client_x509_cert_url":        os.getenv("client_x509_cert_url", ""),
+            }
+            creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+            logger.info("GCP autenticado via campos individuais")
+            return gspread.authorize(creds)
+        except Exception as e:
+            logger.error("Erro campos individuais: %s", e)
 
-    # 4. Local: arquivo JSON
+    # 4. Arquivo JSON local
+    logger.warning("GCP: fallback para arquivo %s", GOOGLE_CREDENTIALS_FILE)
     creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE, scopes=SCOPES)
     return gspread.authorize(creds)
 
