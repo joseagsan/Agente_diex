@@ -1182,6 +1182,15 @@ def page_gerar_req(reqs, ncs):
                 forn = res.get("fornecedor", "") or "Sem fornecedor"
                 grupos.setdefault(forn, []).append(res)
 
+            def _aplicar_fornecedor(forn, cnpj_forn, vig_fim):
+                """Salva dados do fornecedor e incrementa versão para forçar rerender."""
+                st.session_state["_b2_forn"]    = forn
+                st.session_state["_b2_cnpj"]    = cnpj_forn
+                st.session_state["_b2_pregao"]  = st.session_state.get("pesq_pregao", "")
+                st.session_state["_b2_ug"]      = st.session_state.get("pesq_uasg", UG_PADRAO)
+                st.session_state["_b2_vig"]     = vig_fim
+                st.session_state["_b2_ver"]     = st.session_state.get("_b2_ver", 0) + 1
+
             for gi, (forn, itens_forn) in enumerate(grupos.items()):
                 cnpj_forn = itens_forn[0].get("cnpj", "")
                 vig_fim   = itens_forn[0].get("vigencia_fim", "")
@@ -1192,7 +1201,6 @@ def page_gerar_req(reqs, ncs):
                         cb.markdown(res.get("descricao", "")[:80])
                         cc.markdown(res.get("und", ""))
                         cd.markdown(res.get("valor_unit", ""))
-                        # Chave numérica para evitar problemas com chars especiais
                         if ce.button("➕ Usar", key=f"usar_{gi}_{ii}"):
                             v = float(res.get("valor_unit_num", 0.0))
                             st.session_state.req_itens.append({
@@ -1206,17 +1214,11 @@ def page_gerar_req(reqs, ncs):
                                 "VALOR_TOTAL":    fmt(v),
                                 "_total":         v,
                             })
-                            # Preenche Bloco 2 via session state
-                            # (sem st.rerun() — o clique do botão já causa rerun)
-                            st.session_state["sq1_fornecedor"] = forn
-                            st.session_state["sq1_cnpj"]       = cnpj_forn
-                            st.session_state["sq1_num_pregao"] = st.session_state.get("pesq_pregao", "")
-                            st.session_state["sq1_ug_modal"]   = st.session_state.get("pesq_uasg", UG_PADRAO)
-                            st.session_state["sq1_vigencia"]   = vig_fim
+                            _aplicar_fornecedor(forn, cnpj_forn, vig_fim)
                             st.toast(f"✅ Item {res.get('numero_item','')} adicionado!")
 
                     st.divider()
-                    if st.button(f"✅ Usar TODOS os itens deste fornecedor",
+                    if st.button("✅ Usar TODOS os itens deste fornecedor",
                                  key=f"usar_todos_{gi}"):
                         for res in itens_forn:
                             v = float(res.get("valor_unit_num", 0.0))
@@ -1231,11 +1233,7 @@ def page_gerar_req(reqs, ncs):
                                 "VALOR_TOTAL":    fmt(v),
                                 "_total":         v,
                             })
-                        st.session_state["sq1_fornecedor"] = forn
-                        st.session_state["sq1_cnpj"]       = cnpj_forn
-                        st.session_state["sq1_num_pregao"] = st.session_state.get("pesq_pregao", "")
-                        st.session_state["sq1_ug_modal"]   = st.session_state.get("pesq_uasg", UG_PADRAO)
-                        st.session_state["sq1_vigencia"]   = vig_fim
+                        _aplicar_fornecedor(forn, cnpj_forn, vig_fim)
                         st.toast(f"✅ {len(itens_forn)} itens adicionados!")
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
@@ -1243,25 +1241,28 @@ def page_gerar_req(reqs, ncs):
     st.subheader("2. Fornecedor / Pregão")
     st.caption("Preenchido automaticamente ao clicar ➕ Usar — editável se necessário.")
 
-    # Inicializa chaves se ainda não existem
-    st.session_state.setdefault("sq1_fornecedor", "")
-    st.session_state.setdefault("sq1_cnpj",       "")
-    st.session_state.setdefault("sq1_num_pregao", "")
-    st.session_state.setdefault("sq1_ug_modal",   UG_PADRAO)
-    st.session_state.setdefault("sq1_vigencia",   "")
-    st.session_state.setdefault("sq1_tipo_modal", "PREGÃO")
+    # Lê valores armazenados (setados pela função _aplicar_fornecedor)
+    _b2v  = st.session_state.get("_b2_ver", 0)
+    _b2_forn   = st.session_state.get("_b2_forn", "")
+    _b2_cnpj   = st.session_state.get("_b2_cnpj", "")
+    _b2_pregao = st.session_state.get("_b2_pregao", "")
+    _b2_ug     = st.session_state.get("_b2_ug", UG_PADRAO)
+    _b2_vig    = st.session_state.get("_b2_vig", "")
 
+    # Versão no key força rerender com novo value= quando dados mudam
     b2_c1, b2_c2 = st.columns(2)
-    b2_c1.text_input("Fornecedor (Razão Social)", key="sq1_fornecedor")
-    b2_c2.text_input("CNPJ", placeholder="00.000.000/0000-00", key="sq1_cnpj")
+    b2_c1.text_input("Fornecedor (Razão Social)", value=_b2_forn,
+                      key=f"b2_forn_{_b2v}")
+    b2_c2.text_input("CNPJ", value=_b2_cnpj,
+                      placeholder="00.000.000/0000-00", key=f"b2_cnpj_{_b2v}")
 
     b2_m1, b2_m2, b2_m3, b2_m4 = st.columns([2, 2, 1, 2])
     b2_m1.selectbox("Modalidade",
                     ["PREGÃO", "CARONA", "DISPENSA", "INEXIGIBILIDADE", "SUPRIMENTO DE FUNDOS"],
-                    key="sq1_tipo_modal")
-    b2_m2.text_input("Nº Pregão/ARP",  key="sq1_num_pregao")
-    b2_m3.text_input("UG",             key="sq1_ug_modal")
-    b2_m4.text_input("Vigência da ATA", key="sq1_vigencia")
+                    key=f"b2_modal_{_b2v}")
+    b2_m2.text_input("Nº Pregão/ARP",   value=_b2_pregao, key=f"b2_pregao_{_b2v}")
+    b2_m3.text_input("UG",              value=_b2_ug,     key=f"b2_ug_{_b2v}")
+    b2_m4.text_input("Vigência da ATA", value=_b2_vig,    key=f"b2_vig_{_b2v}")
 
     # ── 3. Itens
     st.divider()
@@ -1334,19 +1335,20 @@ def page_gerar_req(reqs, ncs):
             try:
                 from gerador import gerar_para_bytes
 
-                # Monta modalidade a partir do Bloco 2
-                mod_tipo = st.session_state.get("sq1_tipo_modal", "PREGÃO")
-                mod_num  = st.session_state.get("sq1_num_pregao", "")
-                mod_ug   = st.session_state.get("sq1_ug_modal", "")
+                # Lê Bloco 2 pelo widget atual (chave versionada)
+                _bv = st.session_state.get("_b2_ver", 0)
+                mod_tipo   = st.session_state.get(f"b2_modal_{_bv}", "PREGÃO")
+                mod_num    = st.session_state.get(f"b2_pregao_{_bv}", "")
+                mod_ug     = st.session_state.get(f"b2_ug_{_bv}", "")
                 modalidade = f"{mod_tipo} - {mod_num} {mod_ug}".strip(" -")
 
                 total_geral = sum(i["_total"] for i in itens)
                 campos_finais = {
                     **campos,
-                    "FORNECEDOR_NOME": st.session_state.get("sq1_fornecedor", ""),
-                    "FORNECEDOR_CNPJ": _formatar_cnpj(st.session_state.get("sq1_cnpj", "")),
+                    "FORNECEDOR_NOME": st.session_state.get(f"b2_forn_{_bv}", ""),
+                    "FORNECEDOR_CNPJ": _formatar_cnpj(st.session_state.get(f"b2_cnpj_{_bv}", "")),
                     "MODALIDADE":      modalidade,
-                    "VIGENCIA_DA_ATA": st.session_state.get("sq1_vigencia", ""),
+                    "VIGENCIA_DA_ATA": st.session_state.get(f"b2_vig_{_bv}", ""),
                     "TOTAL":           fmt(total_geral),
                 }
                 itens_limpos = [{k: v for k, v in i.items() if not k.startswith("_")} for i in itens]
