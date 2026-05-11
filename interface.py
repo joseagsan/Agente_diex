@@ -1175,69 +1175,89 @@ def page_gerar_req(reqs, ncs):
             if url_exib:
                 st.caption(f"🔗 Fonte: `{url_exib}`")
 
-            # Agrupa por fornecedor
+            # Monta tabela de opções e selectbox (sem botões dentro de loop)
             from collections import OrderedDict
             grupos: dict = OrderedDict()
             for res in resultados_pesq:
                 forn = res.get("fornecedor", "") or "Sem fornecedor"
                 grupos.setdefault(forn, []).append(res)
 
-            for gi, (forn, itens_forn) in enumerate(grupos.items()):
+            # Exibe resultados como tabela simples
+            for forn, itens_forn in grupos.items():
                 cnpj_forn = itens_forn[0].get("cnpj", "")
                 vig_fim   = itens_forn[0].get("vigencia_fim", "")
+                st.markdown(f"**🏢 {forn}** · {cnpj_forn} · Vigência: {vig_fim}")
+                for res in itens_forn:
+                    st.markdown(
+                        f"&nbsp;&nbsp;`{res.get('numero_item','')}` "
+                        f"{res.get('descricao','')[:70]} · "
+                        f"**{res.get('valor_unit','')}** · {res.get('und','')}",
+                        unsafe_allow_html=True,
+                    )
+                st.markdown("---")
 
-                st.markdown(f"---\n**🏢 {forn}** · {cnpj_forn} · Vigência: {vig_fim}")
+            # Selectbox único para escolher o item — SEM botão dentro de loop
+            opcoes_sel = []
+            mapa_opcoes = {}
+            for forn, itens_forn in grupos.items():
+                cnpj_f = itens_forn[0].get("cnpj", "")
+                vig_f  = itens_forn[0].get("vigencia_fim", "")
+                for res in itens_forn:
+                    label = (f"[{forn[:25]}] Item {res.get('numero_item','')} — "
+                             f"{res.get('descricao','')[:40]} — {res.get('valor_unit','')}")
+                    opcoes_sel.append(label)
+                    mapa_opcoes[label] = {
+                        "res": res, "forn": forn,
+                        "cnpj": cnpj_f, "vig": vig_f,
+                    }
 
-                for ii, res in enumerate(itens_forn):
-                    ca, cb, cc, cd, ce = st.columns([1, 5, 2, 2, 2])
-                    ca.markdown(f"**{res.get('numero_item','')}**")
-                    cb.markdown(res.get("descricao", "")[:80])
-                    cc.markdown(res.get("und", ""))
-                    cd.markdown(res.get("valor_unit", ""))
-                    if ce.button("➕ Usar", key=f"u{gi}i{ii}"):
-                        try:
-                            v = float(res.get("valor_unit_num") or 0)
-                            st.session_state.req_itens.append({
-                                "ORD":            str(len(st.session_state.req_itens) + 1),
-                                "ITEM":           str(res.get("numero_item", "")),
-                                "SI":             "",
-                                "DESCRICAO_ITEM": str(res.get("descricao", "")),
-                                "UND":            str(res.get("und", "UN") or "UN"),
-                                "QTD":            "1,000",
-                                "VALOR_UNIT":     fmt(v),
-                                "VALOR_TOTAL":    fmt(v),
-                                "_total":         v,
-                            })
-                            st.session_state["_b2_forn"]   = str(forn)
-                            st.session_state["_b2_cnpj"]   = str(cnpj_forn)
-                            st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
-                            st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                            st.session_state["_b2_vig"]    = str(vig_fim)
-                        except Exception as ex:
-                            st.error(f"Erro ao usar item: {ex}")
+            sel_label = st.selectbox("Selecionar item:", opcoes_sel, key="pesq_sel_item")
 
-                if st.button(f"✅ Usar TODOS ({len(itens_forn)} itens)", key=f"ut{gi}"):
-                    try:
-                        for res in itens_forn:
-                            v = float(res.get("valor_unit_num") or 0)
-                            st.session_state.req_itens.append({
-                                "ORD":            str(len(st.session_state.req_itens) + 1),
-                                "ITEM":           str(res.get("numero_item", "")),
-                                "SI":             "",
-                                "DESCRICAO_ITEM": str(res.get("descricao", "")),
-                                "UND":            str(res.get("und", "UN") or "UN"),
-                                "QTD":            "1,000",
-                                "VALOR_UNIT":     fmt(v),
-                                "VALOR_TOTAL":    fmt(v),
-                                "_total":         v,
-                            })
-                        st.session_state["_b2_forn"]   = str(forn)
-                        st.session_state["_b2_cnpj"]   = str(cnpj_forn)
-                        st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
-                        st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                        st.session_state["_b2_vig"]    = str(vig_fim)
-                    except Exception as ex:
-                        st.error(f"Erro: {ex}")
+            c_usar, c_todos = st.columns(2)
+            if c_usar.button("➕ Adicionar item selecionado", use_container_width=True):
+                dado = mapa_opcoes.get(sel_label, {})
+                res  = dado.get("res", {})
+                v    = float(res.get("valor_unit_num") or 0)
+                st.session_state.req_itens.append({
+                    "ORD":            str(len(st.session_state.req_itens) + 1),
+                    "ITEM":           str(res.get("numero_item", "")),
+                    "SI":             "",
+                    "DESCRICAO_ITEM": str(res.get("descricao", "")),
+                    "UND":            str(res.get("und", "UN") or "UN"),
+                    "QTD":            "1,000",
+                    "VALOR_UNIT":     fmt(v),
+                    "VALOR_TOTAL":    fmt(v),
+                    "_total":         v,
+                })
+                st.session_state["_b2_forn"]   = str(dado.get("forn", ""))
+                st.session_state["_b2_cnpj"]   = str(dado.get("cnpj", ""))
+                st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
+                st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
+                st.session_state["_b2_vig"]    = str(dado.get("vig", ""))
+
+            if c_todos.button("✅ Adicionar TODOS os itens do fornecedor selecionado", use_container_width=True):
+                dado  = mapa_opcoes.get(sel_label, {})
+                forn_sel = dado.get("forn", "")
+                cnpj_sel = dado.get("cnpj", "")
+                vig_sel  = dado.get("vig", "")
+                for res in grupos.get(forn_sel, []):
+                    v = float(res.get("valor_unit_num") or 0)
+                    st.session_state.req_itens.append({
+                        "ORD":            str(len(st.session_state.req_itens) + 1),
+                        "ITEM":           str(res.get("numero_item", "")),
+                        "SI":             "",
+                        "DESCRICAO_ITEM": str(res.get("descricao", "")),
+                        "UND":            str(res.get("und", "UN") or "UN"),
+                        "QTD":            "1,000",
+                        "VALOR_UNIT":     fmt(v),
+                        "VALOR_TOTAL":    fmt(v),
+                        "_total":         v,
+                    })
+                st.session_state["_b2_forn"]   = str(forn_sel)
+                st.session_state["_b2_cnpj"]   = str(cnpj_sel)
+                st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
+                st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
+                st.session_state["_b2_vig"]    = str(vig_sel)
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
