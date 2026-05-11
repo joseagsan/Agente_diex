@@ -1171,52 +1171,80 @@ def page_gerar_req(reqs, ncs):
     # Exibe resultados
     resultados_pesq = st.session_state.get("pesq_resultados", [])
     if resultados_pesq:
-            url_exib = st.session_state.get("pesq_url", "")
-            st.success(f"✅ {len(resultados_pesq)} item(ns) encontrado(s).")
-            if url_exib:
-                st.caption(f"🔗 Fonte: `{url_exib}`")
+        from pesquisa_compras import buscar_detalhe_item
 
-            from pesquisa_compras import buscar_detalhe_item
+        forn_atual = st.session_state.get("_b2_forn", "")
+        itens_ja_adicionados = {it["ITEM"] for it in st.session_state.req_itens}
 
-            forn_atual = st.session_state.get("_b2_forn", "")
-            if forn_atual:
-                st.info(f"🔒 Vinculado a **{forn_atual}** — só itens deste fornecedor podem ser adicionados.")
+        st.success(f"✅ {len(resultados_pesq)} itens encontrados.")
+        if forn_atual:
+            st.info(f"🔒 Vinculado a **{forn_atual}**")
 
-            with st.expander(f"📋 {len(resultados_pesq)} itens encontrados — clique para ver", expanded=True):
-                for idx, res in enumerate(resultados_pesq):
-                    ca, cb, cc = st.columns([1, 8, 2])
-                    ca.markdown(f"**{res.get('numero_item','')}**")
-                    cb.markdown(res.get("descricao", "")[:80])
-                    if cc.button("➕ Usar", key=f"usar_item_{idx}"):
-                        with st.spinner("Carregando detalhes..."):
-                            det = buscar_detalhe_item(
-                                str(res.get("compra_id", "")),
-                                str(res.get("item_id", ""))
-                            )
-                        forn_item = str(det.get("fornecedor", ""))
-                        if forn_atual and forn_item and forn_item != forn_atual:
-                            st.error(f"❌ Item de **{forn_item}** — req vinculada a **{forn_atual}**. Limpe os itens para trocar.")
-                        else:
-                            v    = float(det.get("valor_unit_num") or 0)
-                            desc = det.get("descricao_det") or str(res.get("descricao", ""))
-                            novo_ord = str(len(st.session_state.req_itens) + 1)
-                            st.session_state.req_itens.append({
-                                "ORD":            novo_ord,
-                                "ITEM":           str(res.get("numero_item", "")),
-                                "SI":             "",
-                                "DESCRICAO_ITEM": desc,
-                                "UND":            str(det.get("und") or "UN"),
-                                "QTD":            "1,000",
-                                "VALOR_UNIT":     fmt(v),
-                                "VALOR_TOTAL":    fmt(v),
-                                "_total":         v,
-                                "_vunit":         v,
-                            })
-                            st.session_state["_b2_forn"]   = forn_item or forn_atual
-                            st.session_state["_b2_cnpj"]   = str(det.get("cnpj", ""))
-                            st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
-                            st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                            st.session_state["_b2_vig"]    = str(det.get("vigencia_fim", ""))
+        # Botão "Adicionar todos do fornecedor" (aparece depois do 1º item)
+        if forn_atual and st.session_state.req_itens:
+            if st.button(f"⚡ Adicionar TODOS os itens do fornecedor atual (pode demorar)", use_container_width=True):
+                itens_restantes = [r for r in resultados_pesq
+                                   if r.get("numero_item") not in itens_ja_adicionados]
+                prog = st.progress(0, text="Buscando detalhes...")
+                adicionados = 0
+                for i, res in enumerate(itens_restantes):
+                    prog.progress((i + 1) / len(itens_restantes),
+                                  text=f"Item {i+1}/{len(itens_restantes)}: {res.get('descricao','')[:40]}")
+                    det = buscar_detalhe_item(str(res.get("compra_id","")), str(res.get("item_id","")))
+                    if str(det.get("fornecedor","")) == forn_atual:
+                        v = float(det.get("valor_unit_num") or 0)
+                        st.session_state.req_itens.append({
+                            "ORD":            str(len(st.session_state.req_itens) + 1),
+                            "ITEM":           str(res.get("numero_item","")),
+                            "SI":             "",
+                            "DESCRICAO_ITEM": det.get("descricao_det") or str(res.get("descricao","")),
+                            "UND":            str(det.get("und") or "UN"),
+                            "QTD":            "1,000",
+                            "VALOR_UNIT":     fmt(v),
+                            "VALOR_TOTAL":    fmt(v),
+                            "_total":         v,
+                            "_vunit":         v,
+                        })
+                        adicionados += 1
+                prog.empty()
+                st.success(f"✅ {adicionados} itens de **{forn_atual}** adicionados!")
+                st.rerun()
+
+        # Lista de itens no expander
+        with st.expander(f"📋 Ver todos os {len(resultados_pesq)} itens", expanded=not forn_atual):
+            for idx, res in enumerate(resultados_pesq):
+                num = res.get("numero_item", "")
+                ja_adicionado = num in itens_ja_adicionados
+                ca, cb, cc = st.columns([1, 8, 2])
+                ca.markdown(f"**{num}**" + (" ✓" if ja_adicionado else ""))
+                cb.markdown(res.get("descricao", "")[:80])
+                label = "✓ Adicionado" if ja_adicionado else "➕ Usar"
+                if not ja_adicionado and cc.button(label, key=f"usar_item_{idx}"):
+                    with st.spinner("Carregando..."):
+                        det = buscar_detalhe_item(str(res.get("compra_id","")), str(res.get("item_id","")))
+                    forn_item = str(det.get("fornecedor",""))
+                    if forn_atual and forn_item and forn_item != forn_atual:
+                        st.error(f"❌ Item de **{forn_item}** — req vinculada a **{forn_atual}**. Limpe os itens para trocar.")
+                    else:
+                        v    = float(det.get("valor_unit_num") or 0)
+                        desc = det.get("descricao_det") or str(res.get("descricao",""))
+                        st.session_state.req_itens.append({
+                            "ORD":            str(len(st.session_state.req_itens) + 1),
+                            "ITEM":           str(num),
+                            "SI":             "",
+                            "DESCRICAO_ITEM": desc,
+                            "UND":            str(det.get("und") or "UN"),
+                            "QTD":            "1,000",
+                            "VALOR_UNIT":     fmt(v),
+                            "VALOR_TOTAL":    fmt(v),
+                            "_total":         v,
+                            "_vunit":         v,
+                        })
+                        st.session_state["_b2_forn"]   = forn_item or forn_atual
+                        st.session_state["_b2_cnpj"]   = str(det.get("cnpj",""))
+                        st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao",""))
+                        st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
+                        st.session_state["_b2_vig"]    = str(det.get("vigencia_fim",""))
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
@@ -1302,24 +1330,35 @@ def page_gerar_req(reqs, ncs):
             },
             key="editor_itens",
         )
-        # Aplica edições de SI e QTD de volta ao session state
+        # Aplica edições de SI e QTD — detecta mudança e recalcula total
         changed = False
         for i, row in edited.iterrows():
             if i >= len(st.session_state.req_itens):
                 break
-            item = st.session_state.req_itens[i]
-            new_si  = str(row.get("SI", "") or "")
-            qtd_str = str(row.get("QTD", "1,000") or "1,000")
-            if new_si != item.get("SI", "") or qtd_str != item.get("QTD", ""):
-                item["SI"]  = new_si
-                item["QTD"] = qtd_str
-                # Recalcula total usando _vunit (valor unitário numérico)
-                vunit = float(item.get("_vunit", 0))
-                qtd_num = parse(qtd_str.replace(",", ".").replace(" ", ""))
-                novo_total = round(qtd_num * vunit, 2)
-                item["_total"]      = novo_total
-                item["VALOR_TOTAL"] = fmt(novo_total)
+            it = st.session_state.req_itens[i]
+
+            # SI
+            si_novo = "" if pd.isna(row.get("SI")) else str(row.get("SI", "") or "")
+            if si_novo != str(it.get("SI", "") or ""):
+                it["SI"] = si_novo
                 changed = True
+
+            # QTD — recalcula total
+            qtd_raw = row.get("QTD")
+            if pd.isna(qtd_raw):
+                continue
+            qtd_str = str(qtd_raw).strip()
+            qtd_num = parse(qtd_str)
+            if qtd_num <= 0:
+                continue
+            vunit      = float(it.get("_vunit") or 0)
+            novo_total = round(qtd_num * vunit, 2)
+            if abs(novo_total - float(it.get("_total", 0))) > 0.001:
+                it["QTD"]         = qtd_str
+                it["_total"]      = novo_total
+                it["VALOR_TOTAL"] = fmt(novo_total)
+                changed = True
+
         if changed:
             st.rerun()
 
