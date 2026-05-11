@@ -337,13 +337,16 @@ def buscar_itens_pregao(uasg: str, num_pregao: str) -> ResultadoBusca:
 def buscar_detalhe_item(compra_id: str, item_id: str) -> dict:
     """
     Busca detalhe de UM item específico (preço, fornecedor, CNPJ, vigência).
-    Chamado apenas quando o usuário clica 'Usar'.
+    Chamado apenas quando o usuário clica 'Usar'. v2
     """
     cookies = _carregar_cookies()
     if not cookies:
         return {}
     s = _sessao()
     return _detalhe_item(s, compra_id, item_id)
+
+# ── código legado removido ──────────────────────────────────────────────────
+if False:
     resultados = []
     for it in itens_base:
         try:
