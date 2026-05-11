@@ -1159,7 +1159,15 @@ def page_gerar_req(reqs, ncs):
                               key="pesq_pregao",
                               help="Formato: SEQUENCIAL/ANO — ex: 90008/2025")
 
-    if st.button("🔍 Pesquisar no Portal Compras", key="btn_pesquisar", use_container_width=True):
+    col_pesq, col_limpar = st.columns([4, 1])
+    btn_pesquisar = col_pesq.button("🔍 Pesquisar no Portal Compras", key="btn_pesquisar", use_container_width=True)
+    if col_limpar.button("🗑️ Limpar cache", key="btn_limpar_cache", use_container_width=True):
+        _pesquisar_pregao.clear()
+        st.session_state.pop("pesq_resultados", None)
+        st.session_state.pop("pesq_log", None)
+        st.session_state.pop("pesq_forn_map", None)
+        st.rerun()
+    if btn_pesquisar:
         if not p_pregao:
             st.warning("Digite o número do pregão.")
         else:
@@ -1169,7 +1177,14 @@ def page_gerar_req(reqs, ncs):
             st.session_state["pesq_url"]        = url
             st.session_state["pesq_log"]        = log
             if not itens:
-                st.warning("Nenhum item encontrado.")
+                erro_log = [l for l in log if str(l).startswith("Erro:")]
+                if erro_log:
+                    st.error(erro_log[0])
+                else:
+                    st.warning("Nenhum item encontrado.")
+                with st.expander("🔎 Log de diagnóstico"):
+                    for linha in log:
+                        st.text(linha)
 
     # Exibe resultados
     resultados_pesq = st.session_state.get("pesq_resultados", [])
