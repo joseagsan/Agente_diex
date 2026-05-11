@@ -1180,42 +1180,43 @@ def page_gerar_req(reqs, ncs):
 
             forn_atual = st.session_state.get("_b2_forn", "")
             if forn_atual:
-                st.info(f"🔒 Requisição vinculada a **{forn_atual}** — só itens deste fornecedor podem ser adicionados.")
+                st.info(f"🔒 Vinculado a **{forn_atual}** — só itens deste fornecedor podem ser adicionados.")
 
-            st.markdown("Selecione os itens:")
-            for idx, res in enumerate(resultados_pesq):
-                ca, cb, cc = st.columns([1, 8, 2])
-                ca.markdown(f"**{res.get('numero_item','')}**")
-                cb.markdown(res.get("descricao", "")[:80])
-                if cc.button("➕ Usar", key=f"usar_item_{idx}"):
-                    with st.spinner("Carregando detalhes..."):
-                        det = buscar_detalhe_item(
-                            str(res.get("compra_id", "")),
-                            str(res.get("item_id", ""))
-                        )
-                    forn_item = str(det.get("fornecedor", ""))
-                    # Bloqueio: não permite misturar fornecedores
-                    if forn_atual and forn_item and forn_item != forn_atual:
-                        st.error(f"❌ Item é de **{forn_item}** mas a requisição já tem itens de **{forn_atual}**. Limpe os itens para trocar de fornecedor.")
-                    else:
-                        v    = float(det.get("valor_unit_num") or 0)
-                        desc = det.get("descricao_det") or str(res.get("descricao", ""))
-                        st.session_state.req_itens.append({
-                            "ORD":            str(len(st.session_state.req_itens) + 1),
-                            "ITEM":           str(res.get("numero_item", "")),
-                            "SI":             "",
-                            "DESCRICAO_ITEM": desc,
-                            "UND":            str(det.get("und") or "UN"),
-                            "QTD":            "1,000",
-                            "VALOR_UNIT":     fmt(v),
-                            "VALOR_TOTAL":    fmt(v),
-                            "_total":         v,
-                        })
-                        st.session_state["_b2_forn"]   = forn_item or forn_atual
-                        st.session_state["_b2_cnpj"]   = str(det.get("cnpj", ""))
-                        st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
-                        st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                        st.session_state["_b2_vig"]    = str(det.get("vigencia_fim", ""))
+            with st.expander(f"📋 {len(resultados_pesq)} itens encontrados — clique para ver", expanded=True):
+                for idx, res in enumerate(resultados_pesq):
+                    ca, cb, cc = st.columns([1, 8, 2])
+                    ca.markdown(f"**{res.get('numero_item','')}**")
+                    cb.markdown(res.get("descricao", "")[:80])
+                    if cc.button("➕ Usar", key=f"usar_item_{idx}"):
+                        with st.spinner("Carregando detalhes..."):
+                            det = buscar_detalhe_item(
+                                str(res.get("compra_id", "")),
+                                str(res.get("item_id", ""))
+                            )
+                        forn_item = str(det.get("fornecedor", ""))
+                        if forn_atual and forn_item and forn_item != forn_atual:
+                            st.error(f"❌ Item de **{forn_item}** — req vinculada a **{forn_atual}**. Limpe os itens para trocar.")
+                        else:
+                            v    = float(det.get("valor_unit_num") or 0)
+                            desc = det.get("descricao_det") or str(res.get("descricao", ""))
+                            novo_ord = str(len(st.session_state.req_itens) + 1)
+                            st.session_state.req_itens.append({
+                                "ORD":            novo_ord,
+                                "ITEM":           str(res.get("numero_item", "")),
+                                "SI":             "",
+                                "DESCRICAO_ITEM": desc,
+                                "UND":            str(det.get("und") or "UN"),
+                                "QTD":            "1,000",
+                                "VALOR_UNIT":     fmt(v),
+                                "VALOR_TOTAL":    fmt(v),
+                                "_total":         v,
+                                "_vunit":         v,
+                            })
+                            st.session_state["_b2_forn"]   = forn_item or forn_atual
+                            st.session_state["_b2_cnpj"]   = str(det.get("cnpj", ""))
+                            st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
+                            st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
+                            st.session_state["_b2_vig"]    = str(det.get("vigencia_fim", ""))
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
@@ -1278,6 +1279,7 @@ def page_gerar_req(reqs, ncs):
                 "VALOR_UNIT":     fmt(vunit),
                 "VALOR_TOTAL":    fmt(total),
                 "_total":         total,
+                "_vunit":         vunit,
             })
             st.rerun()
         else:
@@ -1301,22 +1303,25 @@ def page_gerar_req(reqs, ncs):
             key="editor_itens",
         )
         # Aplica edições de SI e QTD de volta ao session state
+        changed = False
         for i, row in edited.iterrows():
-            if i < len(st.session_state.req_itens):
-                st.session_state.req_itens[i]["SI"]  = str(row.get("SI", "") or "")
-                qtd_str = str(row.get("QTD", "1,000") or "1,000")
-                st.session_state.req_itens[i]["QTD"] = qtd_str
-                # Recalcula total com nova quantidade
-                try:
-                    from relatorios import parse
-                    qtd_num = parse(qtd_str.replace(",", "."))
-                    v_unit  = st.session_state.req_itens[i]["_total"] / \
-                              (parse(st.session_state.req_itens[i]["QTD"].replace(",",".")) or 1)
-                    novo_total = round(qtd_num * v_unit, 2)
-                    st.session_state.req_itens[i]["_total"]      = novo_total
-                    st.session_state.req_itens[i]["VALOR_TOTAL"]  = fmt(novo_total)
-                except Exception:
-                    pass
+            if i >= len(st.session_state.req_itens):
+                break
+            item = st.session_state.req_itens[i]
+            new_si  = str(row.get("SI", "") or "")
+            qtd_str = str(row.get("QTD", "1,000") or "1,000")
+            if new_si != item.get("SI", "") or qtd_str != item.get("QTD", ""):
+                item["SI"]  = new_si
+                item["QTD"] = qtd_str
+                # Recalcula total usando _vunit (valor unitário numérico)
+                vunit = float(item.get("_vunit", 0))
+                qtd_num = parse(qtd_str.replace(",", ".").replace(" ", ""))
+                novo_total = round(qtd_num * vunit, 2)
+                item["_total"]      = novo_total
+                item["VALOR_TOTAL"] = fmt(novo_total)
+                changed = True
+        if changed:
+            st.rerun()
 
         total_geral = sum(i["_total"] for i in st.session_state.req_itens)
         k1, k2 = st.columns([1, 3])
