@@ -1168,16 +1168,9 @@ def page_gerar_req(reqs, ncs):
             if not itens:
                 st.warning("Nenhum item encontrado.")
 
-    # Restaura do cache se a sessão foi resetada (widget keys preservados)
-    if not st.session_state.get("pesq_resultados") and p_pregao:
-        try:
-            _cache = _pesquisar_pregao.__wrapped__ if hasattr(_pesquisar_pregao, "__wrapped__") else None
-        except Exception:
-            pass
-
-        # Exibe resultados
-        resultados_pesq = st.session_state.get("pesq_resultados", [])
-        if resultados_pesq:
+    # Exibe resultados
+    resultados_pesq = st.session_state.get("pesq_resultados", [])
+    if resultados_pesq:
             url_exib = st.session_state.get("pesq_url", "")
             st.success(f"✅ {len(resultados_pesq)} item(ns) encontrado(s).")
             if url_exib:
