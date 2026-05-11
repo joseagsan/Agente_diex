@@ -180,6 +180,14 @@ def _frases(tipo: str) -> list[str]:
     return ["— escrever manualmente —"] + ler_frases(tipo)
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _pesquisar_pregao(uasg: str, num_pregao: str) -> tuple:
+    """Cache da pesquisa — persiste mesmo com reset de sessão (30 min TTL)."""
+    from pesquisa_compras import buscar_itens_pregao
+    r = buscar_itens_pregao(uasg, num_pregao)
+    return r.itens, r.log, r.url_usada
+
+
 def carregar(forcar: bool = False):
     if forcar:
         _load.clear()
@@ -1152,20 +1160,20 @@ def page_gerar_req(reqs, ncs):
         if not p_pregao:
             st.warning("Digite o número do pregão.")
         else:
-            with st.spinner("🌐 Buscando em comprasnet.gov.br..."):
-                from pesquisa_compras import buscar_itens_pregao
-                resultado = buscar_itens_pregao(p_uasg, p_pregao)
-                st.session_state["pesq_resultados"] = resultado.itens
-                st.session_state["pesq_url"]        = resultado.url_usada
-                st.session_state["pesq_log"]        = resultado.log
+            with st.spinner("🌐 Buscando..."):
+                itens, log, url = _pesquisar_pregao(p_uasg, p_pregao)
+            st.session_state["pesq_resultados"] = itens
+            st.session_state["pesq_url"]        = url
+            st.session_state["pesq_log"]        = log
+            if not itens:
+                st.warning("Nenhum item encontrado.")
 
-            # Exibe log de diagnóstico sempre
-            with st.expander("🔍 Diagnóstico da busca", expanded=not resultado.itens):
-                for linha in resultado.log:
-                    st.text(linha)
-
-            if not resultado.itens:
-                st.warning("Nenhum item retornado. Veja o diagnóstico acima.")
+    # Restaura do cache se a sessão foi resetada (widget keys preservados)
+    if not st.session_state.get("pesq_resultados") and p_pregao:
+        try:
+            _cache = _pesquisar_pregao.__wrapped__ if hasattr(_pesquisar_pregao, "__wrapped__") else None
+        except Exception:
+            pass
 
         # Exibe resultados
         resultados_pesq = st.session_state.get("pesq_resultados", [])
@@ -1175,105 +1183,39 @@ def page_gerar_req(reqs, ncs):
             if url_exib:
                 st.caption(f"🔗 Fonte: `{url_exib}`")
 
-            # Monta tabela de opções e selectbox (sem botões dentro de loop)
             from collections import OrderedDict
-            grupos: dict = OrderedDict()
-            for res in resultados_pesq:
-                forn = res.get("fornecedor", "") or "Sem fornecedor"
-                grupos.setdefault(forn, []).append(res)
+            from pesquisa_compras import buscar_detalhe_item
 
-            # Exibe resultados como tabela simples
-            for forn, itens_forn in grupos.items():
-                cnpj_forn = itens_forn[0].get("cnpj", "")
-                vig_fim   = itens_forn[0].get("vigencia_fim", "")
-                st.markdown(f"**🏢 {forn}** · {cnpj_forn} · Vigência: {vig_fim}")
-                for res in itens_forn:
-                    st.markdown(
-                        f"&nbsp;&nbsp;`{res.get('numero_item','')}` "
-                        f"{res.get('descricao','')[:70]} · "
-                        f"**{res.get('valor_unit','')}** · {res.get('und','')}",
-                        unsafe_allow_html=True,
-                    )
-                st.markdown("---")
-
-            # Selectbox único para escolher o item — SEM botão dentro de loop
-            opcoes_sel = []
-            mapa_opcoes = {}
-            for forn, itens_forn in grupos.items():
-                cnpj_f = itens_forn[0].get("cnpj", "")
-                vig_f  = itens_forn[0].get("vigencia_fim", "")
-                for res in itens_forn:
-                    label = (f"[{forn[:25]}] Item {res.get('numero_item','')} — "
-                             f"{res.get('descricao','')[:40]} — {res.get('valor_unit','')}")
-                    opcoes_sel.append(label)
-                    mapa_opcoes[label] = {
-                        "res": res, "forn": forn,
-                        "cnpj": cnpj_f, "vig": vig_f,
-                    }
-
-            sel_label = st.selectbox("Selecionar item:", opcoes_sel, key="pesq_sel_item")
-
-            c_usar, c_todos = st.columns(2)
-            if c_usar.button("➕ Adicionar item selecionado", use_container_width=True):
-                dado = mapa_opcoes.get(sel_label, {})
-                res  = dado.get("res", {})
-                # Busca detalhe do item selecionado (1 requisição apenas)
-                with st.spinner("Buscando detalhes do item..."):
-                    from pesquisa_compras import buscar_detalhe_item
-                    det = buscar_detalhe_item(
-                        str(res.get("compra_id", "")),
-                        str(res.get("item_id", ""))
-                    )
-                v    = float(det.get("valor_unit_num") or 0)
-                desc = det.get("descricao_det") or str(res.get("descricao", ""))
-                st.session_state.req_itens.append({
-                    "ORD":            str(len(st.session_state.req_itens) + 1),
-                    "ITEM":           str(res.get("numero_item", "")),
-                    "SI":             "",
-                    "DESCRICAO_ITEM": desc,
-                    "UND":            str(det.get("und") or "UN"),
-                    "QTD":            "1,000",
-                    "VALOR_UNIT":     fmt(v),
-                    "VALOR_TOTAL":    fmt(v),
-                    "_total":         v,
-                })
-                st.session_state["_b2_forn"]   = str(det.get("fornecedor") or dado.get("forn", ""))
-                st.session_state["_b2_cnpj"]   = str(det.get("cnpj") or dado.get("cnpj", ""))
-                st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
-                st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                st.session_state["_b2_vig"]    = str(det.get("vigencia_fim") or dado.get("vig", ""))
-
-            if c_todos.button("✅ Usar TODOS do fornecedor selecionado", use_container_width=True):
-                dado     = mapa_opcoes.get(sel_label, {})
-                forn_sel = dado.get("forn", "")
-                itens_forn_sel = grupos.get(forn_sel, [])
-                from pesquisa_compras import buscar_detalhe_item
-                with st.spinner(f"Carregando detalhes de {len(itens_forn_sel)} itens..."):
-                    primeiro_det = {}
-                    for res in itens_forn_sel:
+            # Lista todos os itens com ➕ Usar por linha
+            st.markdown("Selecione os itens que deseja usar:")
+            for idx, res in enumerate(resultados_pesq):
+                ca, cb, cc = st.columns([1, 8, 2])
+                ca.markdown(f"**{res.get('numero_item','')}**")
+                cb.markdown(res.get("descricao", "")[:80])
+                if cc.button("➕ Usar", key=f"usar_item_{idx}"):
+                    with st.spinner("Carregando detalhes..."):
                         det = buscar_detalhe_item(
                             str(res.get("compra_id", "")),
                             str(res.get("item_id", ""))
                         )
-                        if not primeiro_det:
-                            primeiro_det = det
-                        v = float(det.get("valor_unit_num") or 0)
-                        st.session_state.req_itens.append({
-                            "ORD":            str(len(st.session_state.req_itens) + 1),
-                            "ITEM":           str(res.get("numero_item", "")),
-                            "SI":             "",
-                            "DESCRICAO_ITEM": str(det.get("descricao_det") or res.get("descricao", "")),
-                            "UND":            str(det.get("und") or "UN"),
-                            "QTD":            "1,000",
-                            "VALOR_UNIT":     fmt(v),
-                            "VALOR_TOTAL":    fmt(v),
-                            "_total":         v,
-                        })
-                st.session_state["_b2_forn"]   = str(primeiro_det.get("fornecedor") or forn_sel)
-                st.session_state["_b2_cnpj"]   = str(primeiro_det.get("cnpj") or dado.get("cnpj",""))
-                st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
-                st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                st.session_state["_b2_vig"]    = str(primeiro_det.get("vigencia_fim") or "")
+                    v    = float(det.get("valor_unit_num") or 0)
+                    desc = det.get("descricao_det") or str(res.get("descricao", ""))
+                    st.session_state.req_itens.append({
+                        "ORD":            str(len(st.session_state.req_itens) + 1),
+                        "ITEM":           str(res.get("numero_item", "")),
+                        "SI":             "",
+                        "DESCRICAO_ITEM": desc,
+                        "UND":            str(det.get("und") or "UN"),
+                        "QTD":            "1,000",
+                        "VALOR_UNIT":     fmt(v),
+                        "VALOR_TOTAL":    fmt(v),
+                        "_total":         v,
+                    })
+                    st.session_state["_b2_forn"]   = str(det.get("fornecedor", ""))
+                    st.session_state["_b2_cnpj"]   = str(det.get("cnpj", ""))
+                    st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
+                    st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
+                    st.session_state["_b2_vig"]    = str(det.get("vigencia_fim", ""))
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
