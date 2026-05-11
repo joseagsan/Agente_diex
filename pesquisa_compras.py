@@ -67,7 +67,6 @@ def _carregar_cookies() -> list:
         logger.warning("Erro ao ler Streamlit secrets: %s", e)
 
     # 3. Variável de ambiente (Railway)
-    import os
     raw = os.getenv("session_json") or os.getenv("SESSION_JSON", "")
     if raw:
         logger.info("Sessão carregada da variável de ambiente.")
