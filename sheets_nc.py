@@ -31,7 +31,7 @@ COLUNAS_REQ = [
 
 
 def _conectar() -> gspread.Client:
-    # Streamlit Cloud: credenciais como secret [gcp_service_account]
+    # 1. Streamlit Cloud: secret [gcp_service_account]
     try:
         import streamlit as st
         if "gcp_service_account" in st.secrets:
@@ -41,7 +41,16 @@ def _conectar() -> gspread.Client:
             return gspread.authorize(creds)
     except Exception:
         pass
-    # Local: arquivo JSON
+
+    # 2. Railway / qualquer env: variável GCP_CREDENTIALS_JSON com o JSON completo
+    import os, json
+    raw = os.getenv("GCP_CREDENTIALS_JSON", "")
+    if raw:
+        info = json.loads(raw)
+        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+        return gspread.authorize(creds)
+
+    # 3. Local: arquivo JSON
     creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE, scopes=SCOPES)
     return gspread.authorize(creds)
 

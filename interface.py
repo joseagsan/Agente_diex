@@ -184,8 +184,11 @@ def _frases(tipo: str) -> list[str]:
 def _pesquisar_pregao(uasg: str, num_pregao: str) -> tuple:
     """Cache da pesquisa — persiste mesmo com reset de sessão (30 min TTL)."""
     from pesquisa_compras import buscar_itens_pregao
-    r = buscar_itens_pregao(uasg, num_pregao)
-    return r.itens, r.log, r.url_usada
+    try:
+        r = buscar_itens_pregao(uasg, num_pregao)
+        return r.itens, r.log, r.url_usada
+    except Exception as e:
+        return [], [f"Erro: {e}"], ""
 
 
 def carregar(forcar: bool = False):
@@ -1180,39 +1183,85 @@ def page_gerar_req(reqs, ncs):
         if forn_atual:
             st.info(f"🔒 Vinculado a **{forn_atual}**")
 
-        # Botão "Adicionar todos do fornecedor" (aparece depois do 1º item)
-        if forn_atual and st.session_state.req_itens:
-            if st.button(f"⚡ Adicionar TODOS os itens do fornecedor atual (pode demorar)", use_container_width=True):
-                itens_restantes = [r for r in resultados_pesq
-                                   if r.get("numero_item") not in itens_ja_adicionados]
-                prog = st.progress(0, text="Buscando detalhes...")
-                adicionados = 0
-                for i, res in enumerate(itens_restantes):
-                    prog.progress((i + 1) / len(itens_restantes),
-                                  text=f"Item {i+1}/{len(itens_restantes)}: {res.get('descricao','')[:40]}")
+        # ── Carregar fornecedores para ver agrupado ───────────────────────────
+        forn_map = st.session_state.get("pesq_forn_map", {})
+        forn_map_pregao = st.session_state.get("pesq_forn_map_pregao", "")
+        pregao_atual = st.session_state.get("pesq_pregao", "")
+
+        # Invalida cache se o pregão mudou
+        if forn_map_pregao != pregao_atual:
+            forn_map = {}
+            st.session_state["pesq_forn_map"] = {}
+
+        if not forn_map:
+            if st.button("🔍 Carregar fornecedores (agrupa itens por empresa)",
+                         use_container_width=True):
+                prog = st.progress(0, text="Carregando detalhes dos itens...")
+                mapa = {}
+                for i, res in enumerate(resultados_pesq):
+                    prog.progress((i + 1) / len(resultados_pesq),
+                                  text=f"{i+1}/{len(resultados_pesq)} — {res.get('descricao','')[:35]}")
                     det = buscar_detalhe_item(str(res.get("compra_id","")), str(res.get("item_id","")))
-                    if str(det.get("fornecedor","")) == forn_atual:
-                        v = float(det.get("valor_unit_num") or 0)
-                        st.session_state.req_itens.append({
-                            "ORD":            str(len(st.session_state.req_itens) + 1),
-                            "ITEM":           str(res.get("numero_item","")),
-                            "SI":             "",
-                            "DESCRICAO_ITEM": det.get("descricao_det") or str(res.get("descricao","")),
-                            "UND":            str(det.get("und") or "UN"),
-                            "QTD":            "1,000",
-                            "VALOR_UNIT":     fmt(v),
-                            "VALOR_TOTAL":    fmt(v),
-                            "_total":         v,
-                            "_vunit":         v,
-                        })
-                        adicionados += 1
+                    mapa[res.get("numero_item","")] = {**res, **det}
                 prog.empty()
-                st.success(f"✅ {adicionados} itens de **{forn_atual}** adicionados!")
+                st.session_state["pesq_forn_map"]       = mapa
+                st.session_state["pesq_forn_map_pregao"] = pregao_atual
+                st.rerun()
+        else:
+            # Agrupa por fornecedor
+            from collections import defaultdict
+            grupos_forn: dict = defaultdict(list)
+            for num, dados in forn_map.items():
+                f = dados.get("fornecedor") or "Sem fornecedor"
+                grupos_forn[f].append(dados)
+
+            st.caption(f"📊 {len(grupos_forn)} fornecedor(es) | {len(forn_map)} itens")
+            if st.button("🔄 Recarregar fornecedores"):
+                st.session_state["pesq_forn_map"] = {}
                 st.rerun()
 
-        # Lista de itens no expander
-        with st.expander(f"📋 Ver todos os {len(resultados_pesq)} itens", expanded=not forn_atual):
-            for idx, res in enumerate(resultados_pesq):
+            for forn_grp, itens_grp in sorted(grupos_forn.items()):
+                cnpj_grp = itens_grp[0].get("cnpj","")
+                vig_grp  = itens_grp[0].get("vigencia_fim","")
+                with st.expander(f"🏢 **{forn_grp}** — {len(itens_grp)} item(ns)", expanded=False):
+                    for gidx, dados in enumerate(itens_grp):
+                        num = dados.get("numero_item","")
+                        ja  = num in itens_ja_adicionados
+                        ca, cb, cc = st.columns([1, 8, 2])
+                        ca.markdown(f"**{num}**")
+                        cb.markdown(f"{dados.get('descricao_det') or dados.get('descricao','')[:80]} — {dados.get('valor_unit','')}")
+                        if ja:
+                            cc.markdown("✓")
+                        elif cc.button("➕", key=f"ug_{forn_grp[:8]}_{gidx}"):
+                            if forn_atual and forn_grp != forn_atual:
+                                st.error(f"❌ Req vinculada a **{forn_atual}**.")
+                            else:
+                                v = float(dados.get("valor_unit_num") or 0)
+                                st.session_state.req_itens.append({
+                                    "ORD":            str(len(st.session_state.req_itens) + 1),
+                                    "ITEM":           str(num),
+                                    "SI":             "",
+                                    "DESCRICAO_ITEM": dados.get("descricao_det") or dados.get("descricao",""),
+                                    "UND":            str(dados.get("und") or "UN"),
+                                    "QTD":            "1,000",
+                                    "VALOR_UNIT":     fmt(v),
+                                    "VALOR_TOTAL":    fmt(v),
+                                    "_total":         v,
+                                    "_vunit":         v,
+                                })
+                                st.session_state["_b2_forn"]   = forn_grp
+                                st.session_state["_b2_cnpj"]   = cnpj_grp
+                                st.session_state["_b2_pregao"] = pregao_atual
+                                st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
+                                st.session_state["_b2_vig"]    = vig_grp
+
+            # Se forn_map está carregado, não precisa mais do expander flat abaixo
+            forn_map = st.session_state.get("pesq_forn_map", {})
+
+        # Lista flat (antes de carregar fornecedores)
+        if not st.session_state.get("pesq_forn_map"):
+            with st.expander(f"📋 Ver todos os {len(resultados_pesq)} itens (sem agrupamento)", expanded=True):
+              for idx, res in enumerate(resultados_pesq):
                 num = res.get("numero_item", "")
                 ja_adicionado = num in itens_ja_adicionados
                 ca, cb, cc = st.columns([1, 8, 2])
