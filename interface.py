@@ -1176,11 +1176,13 @@ def page_gerar_req(reqs, ncs):
             if url_exib:
                 st.caption(f"🔗 Fonte: `{url_exib}`")
 
-            from collections import OrderedDict
             from pesquisa_compras import buscar_detalhe_item
 
-            # Lista todos os itens com ➕ Usar por linha
-            st.markdown("Selecione os itens que deseja usar:")
+            forn_atual = st.session_state.get("_b2_forn", "")
+            if forn_atual:
+                st.info(f"🔒 Requisição vinculada a **{forn_atual}** — só itens deste fornecedor podem ser adicionados.")
+
+            st.markdown("Selecione os itens:")
             for idx, res in enumerate(resultados_pesq):
                 ca, cb, cc = st.columns([1, 8, 2])
                 ca.markdown(f"**{res.get('numero_item','')}**")
@@ -1191,24 +1193,29 @@ def page_gerar_req(reqs, ncs):
                             str(res.get("compra_id", "")),
                             str(res.get("item_id", ""))
                         )
-                    v    = float(det.get("valor_unit_num") or 0)
-                    desc = det.get("descricao_det") or str(res.get("descricao", ""))
-                    st.session_state.req_itens.append({
-                        "ORD":            str(len(st.session_state.req_itens) + 1),
-                        "ITEM":           str(res.get("numero_item", "")),
-                        "SI":             "",
-                        "DESCRICAO_ITEM": desc,
-                        "UND":            str(det.get("und") or "UN"),
-                        "QTD":            "1,000",
-                        "VALOR_UNIT":     fmt(v),
-                        "VALOR_TOTAL":    fmt(v),
-                        "_total":         v,
-                    })
-                    st.session_state["_b2_forn"]   = str(det.get("fornecedor", ""))
-                    st.session_state["_b2_cnpj"]   = str(det.get("cnpj", ""))
-                    st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
-                    st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                    st.session_state["_b2_vig"]    = str(det.get("vigencia_fim", ""))
+                    forn_item = str(det.get("fornecedor", ""))
+                    # Bloqueio: não permite misturar fornecedores
+                    if forn_atual and forn_item and forn_item != forn_atual:
+                        st.error(f"❌ Item é de **{forn_item}** mas a requisição já tem itens de **{forn_atual}**. Limpe os itens para trocar de fornecedor.")
+                    else:
+                        v    = float(det.get("valor_unit_num") or 0)
+                        desc = det.get("descricao_det") or str(res.get("descricao", ""))
+                        st.session_state.req_itens.append({
+                            "ORD":            str(len(st.session_state.req_itens) + 1),
+                            "ITEM":           str(res.get("numero_item", "")),
+                            "SI":             "",
+                            "DESCRICAO_ITEM": desc,
+                            "UND":            str(det.get("und") or "UN"),
+                            "QTD":            "1,000",
+                            "VALOR_UNIT":     fmt(v),
+                            "VALOR_TOTAL":    fmt(v),
+                            "_total":         v,
+                        })
+                        st.session_state["_b2_forn"]   = forn_item or forn_atual
+                        st.session_state["_b2_cnpj"]   = str(det.get("cnpj", ""))
+                        st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
+                        st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
+                        st.session_state["_b2_vig"]    = str(det.get("vigencia_fim", ""))
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
@@ -1278,10 +1285,39 @@ def page_gerar_req(reqs, ncs):
 
     if st.session_state.req_itens:
         df_it = pd.DataFrame(st.session_state.req_itens)
-        st.dataframe(
+        edited = st.data_editor(
             df_it[["ORD", "ITEM", "SI", "DESCRICAO_ITEM", "UND", "QTD", "VALOR_UNIT", "VALOR_TOTAL"]],
             use_container_width=True, hide_index=True,
+            column_config={
+                "ORD":           st.column_config.TextColumn("Ord", disabled=True, width="small"),
+                "ITEM":          st.column_config.TextColumn("Item", disabled=True, width="small"),
+                "SI":            st.column_config.TextColumn("SI", width="small"),
+                "DESCRICAO_ITEM":st.column_config.TextColumn("Descrição", disabled=True),
+                "UND":           st.column_config.TextColumn("Und", disabled=True, width="small"),
+                "QTD":           st.column_config.TextColumn("Qtd"),
+                "VALOR_UNIT":    st.column_config.TextColumn("Valor Unit.", disabled=True),
+                "VALOR_TOTAL":   st.column_config.TextColumn("Valor Total", disabled=True),
+            },
+            key="editor_itens",
         )
+        # Aplica edições de SI e QTD de volta ao session state
+        for i, row in edited.iterrows():
+            if i < len(st.session_state.req_itens):
+                st.session_state.req_itens[i]["SI"]  = str(row.get("SI", "") or "")
+                qtd_str = str(row.get("QTD", "1,000") or "1,000")
+                st.session_state.req_itens[i]["QTD"] = qtd_str
+                # Recalcula total com nova quantidade
+                try:
+                    from relatorios import parse
+                    qtd_num = parse(qtd_str.replace(",", "."))
+                    v_unit  = st.session_state.req_itens[i]["_total"] / \
+                              (parse(st.session_state.req_itens[i]["QTD"].replace(",",".")) or 1)
+                    novo_total = round(qtd_num * v_unit, 2)
+                    st.session_state.req_itens[i]["_total"]      = novo_total
+                    st.session_state.req_itens[i]["VALOR_TOTAL"]  = fmt(novo_total)
+                except Exception:
+                    pass
+
         total_geral = sum(i["_total"] for i in st.session_state.req_itens)
         k1, k2 = st.columns([1, 3])
         k1.metric("💰 Total Geral", fmt(total_geral))
@@ -1308,14 +1344,17 @@ def page_gerar_req(reqs, ncs):
             try:
                 from gerador import gerar_para_bytes
 
-                modalidade = f"{st.session_state.get('b2_modal_inp','PREGÃO')} - {st.session_state.get('b2_pregao_inp','')} {st.session_state.get('b2_ug_inp','')}".strip(" -")
+                b2_modal  = st.session_state.get("b2_modal_inp", "PREGÃO")
+                b2_pregao = st.session_state.get("_b2_pregao") or st.session_state.get("b2_pregao_inp", "")
+                b2_ug     = st.session_state.get("_b2_ug") or st.session_state.get("b2_ug_inp", "")
+                modalidade = f"{b2_modal} - {b2_pregao} {b2_ug}".strip(" -")
                 total_geral = sum(i["_total"] for i in itens)
                 campos_finais = {
                     **campos,
-                    "FORNECEDOR_NOME": st.session_state.get("b2_forn_inp", ""),
-                    "FORNECEDOR_CNPJ": _formatar_cnpj(st.session_state.get("b2_cnpj_inp", "")),
+                    "FORNECEDOR_NOME": st.session_state.get("_b2_forn") or st.session_state.get("b2_forn_inp", ""),
+                    "FORNECEDOR_CNPJ": _formatar_cnpj(st.session_state.get("_b2_cnpj") or st.session_state.get("b2_cnpj_inp", "")),
                     "MODALIDADE":      modalidade,
-                    "VIGENCIA_DA_ATA": st.session_state.get("b2_vig_inp", ""),
+                    "VIGENCIA_DA_ATA": st.session_state.get("_b2_vig") or st.session_state.get("b2_vig_inp", ""),
                     "TOTAL":           fmt(total_geral),
                 }
                 itens_limpos = [{k: v for k, v in i.items() if not k.startswith("_")} for i in itens]
