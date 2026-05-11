@@ -1239,22 +1239,22 @@ def page_gerar_req(reqs, ncs):
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
     st.subheader("2. Fornecedor / Pregão")
-    st.caption("Preenchido automaticamente ao clicar ➕ Usar — editável se necessário.")
 
-    # Lê valores armazenados (setados pela função _aplicar_fornecedor)
-    _b2v  = st.session_state.get("_b2_ver", 0)
+    # Debug — remove depois de confirmar funcionamento
+    with st.expander("🐛 DEBUG session state b2", expanded=False):
+        st.write({k: v for k, v in st.session_state.items()
+                  if str(k).startswith("_b2")})
+
     _b2_forn   = st.session_state.get("_b2_forn", "")
     _b2_cnpj   = st.session_state.get("_b2_cnpj", "")
     _b2_pregao = st.session_state.get("_b2_pregao", "")
     _b2_ug     = st.session_state.get("_b2_ug", UG_PADRAO)
     _b2_vig    = st.session_state.get("_b2_vig", "")
+    _b2v       = st.session_state.get("_b2_ver", 0)
 
-    # Versão no key força rerender com novo value= quando dados mudam
     b2_c1, b2_c2 = st.columns(2)
-    b2_c1.text_input("Fornecedor (Razão Social)", value=_b2_forn,
-                      key=f"b2_forn_{_b2v}")
-    b2_c2.text_input("CNPJ", value=_b2_cnpj,
-                      placeholder="00.000.000/0000-00", key=f"b2_cnpj_{_b2v}")
+    b2_c1.text_input("Fornecedor (Razão Social)", value=_b2_forn, key=f"b2_forn_{_b2v}")
+    b2_c2.text_input("CNPJ", value=_b2_cnpj, key=f"b2_cnpj_{_b2v}")
 
     b2_m1, b2_m2, b2_m3, b2_m4 = st.columns([2, 2, 1, 2])
     b2_m1.selectbox("Modalidade",
