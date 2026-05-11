@@ -63,12 +63,17 @@ def _carregar_cookies() -> list:
         if raw:
             logger.info("Sessão carregada dos Streamlit secrets.")
             return json.loads(raw).get("cookies", [])
-        else:
-            logger.warning("'session_json' não encontrado em nenhuma seção dos secrets.")
     except Exception as e:
         logger.warning("Erro ao ler Streamlit secrets: %s", e)
 
-    logger.error("Nenhuma sessão encontrada (arquivo nem secrets).")
+    # 3. Variável de ambiente (Railway)
+    import os
+    raw = os.getenv("session_json") or os.getenv("SESSION_JSON", "")
+    if raw:
+        logger.info("Sessão carregada da variável de ambiente.")
+        return json.loads(raw).get("cookies", [])
+
+    logger.error("Nenhuma sessão encontrada (arquivo nem secrets nem env).")
     return []
 
 

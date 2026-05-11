@@ -25,7 +25,7 @@ OUTPUT_DIR           = _s("OUTPUT_DIR", "output")
 
 # --- Controle de NCs ---
 ANTHROPIC_API_KEY    = _s("ANTHROPIC_API_KEY")
-SHEET_ID_NC          = _s("SHEET_ID_NC", "1AnOjrKRqCD4Y3lqjlfWPVytYDeY6xLVQXil9rCkCFio")
+SHEET_ID_NC          = _s("SHEET_ID_NC") or _s("GOOGLE_SHEET_ID", "1AnOjrKRqCD4Y3lqjlfWPVytYDeY6xLVQXil9rCkCFio")
 ABA_NCS              = _s("ABA_NCS",  "NC 2026")
 ABA_REQS             = _s("ABA_REQS", "REQUISIÇÕES DE EMPENHOS")
 ABA_FORNECEDORES     = _s("ABA_FORNECEDORES", "AGENDA")

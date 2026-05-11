@@ -42,15 +42,32 @@ def _conectar() -> gspread.Client:
     except Exception:
         pass
 
-    # 2. Railway / qualquer env: variável GCP_CREDENTIALS_JSON com o JSON completo
+    # 2. Railway: variável GCP_CREDENTIALS_JSON (JSON completo) ou campos individuais
     import os, json
     raw = os.getenv("GCP_CREDENTIALS_JSON", "")
     if raw:
-        info = json.loads(raw)
+        creds = Credentials.from_service_account_info(json.loads(raw), scopes=SCOPES)
+        return gspread.authorize(creds)
+
+    # 3. Railway: campos individuais (type, project_id, private_key, ...)
+    pk = os.getenv("private_key", "")
+    if pk:
+        info = {
+            "type":                        os.getenv("type", "service_account"),
+            "project_id":                  os.getenv("project_id", ""),
+            "private_key_id":              os.getenv("private_key_id", ""),
+            "private_key":                 pk.replace("\\n", "\n"),
+            "client_email":                os.getenv("client_email", ""),
+            "client_id":                   os.getenv("client_id", ""),
+            "auth_uri":                    os.getenv("auth_uri", "https://accounts.google.com/o/oauth2/auth"),
+            "token_uri":                   os.getenv("token_uri", "https://oauth2.googleapis.com/token"),
+            "auth_provider_x509_cert_url": os.getenv("auth_provider_x509_cert_url", ""),
+            "client_x509_cert_url":        os.getenv("client_x509_cert_url", ""),
+        }
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
         return gspread.authorize(creds)
 
-    # 3. Local: arquivo JSON
+    # 4. Local: arquivo JSON
     creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE, scopes=SCOPES)
     return gspread.authorize(creds)
 
