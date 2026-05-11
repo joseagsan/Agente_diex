@@ -289,14 +289,8 @@ class ResultadoBusca:
 
 def buscar_itens_pregao(uasg: str, num_pregao: str) -> ResultadoBusca:
     """
-    Busca todos os itens de um pregão em contratos.sistema.gov.br.
-
-    Args:
-        uasg: código UASG (ex: "160482")
-        num_pregao: número do pregão (ex: "90009/2025")
-
-    Returns:
-        ResultadoBusca com itens e log de diagnóstico.
+    Busca RÁPIDA — só lista itens (número e descrição).
+    Detalhes (preço, fornecedor, CNPJ) são buscados depois com buscar_detalhe_item().
     """
     r = ResultadoBusca()
     r.add(f"📥 UASG={uasg} | Pregão={num_pregao}")
@@ -310,19 +304,46 @@ def buscar_itens_pregao(uasg: str, num_pregao: str) -> ResultadoBusca:
 
     s = _sessao()
 
-    # Passo 1 — ID da compra
     r.add("🔍 Buscando ID da compra...")
     compra_id = _buscar_id_compra(s, uasg, num_pregao)
-    r.add(f"✅ ID encontrado: {compra_id} → {BASE}/transparencia/compras/{compra_id}/itens")
+    r.add(f"✅ ID encontrado: {compra_id}")
     r.url_usada = f"{BASE}/transparencia/compras/{compra_id}/itens"
 
-    # Passo 2 — Lista itens
     r.add("📋 Listando itens...")
     itens_base = _listar_itens(s, compra_id)
-    r.add(f"✅ {len(itens_base)} itens encontrados.")
+    r.add(f"✅ {len(itens_base)} itens encontrados. Selecione um para ver detalhes.")
 
-    # Passo 3 — Detalhe de cada item (preço, fornecedor, vigência)
-    r.add("📦 Buscando detalhes de cada item (fornecedor, preço, vigência)...")
+    resultados = []
+    for it in itens_base:
+        resultados.append({
+            "numero_item":     it["numero"],
+            "item_id":         it["item_id"],
+            "compra_id":       compra_id,
+            "descricao":       it["descricao"],
+            "und":             "",
+            "valor_unit_num":  0.0,
+            "valor_unit":      "—",
+            "fornecedor":      "",
+            "cnpj":            "",
+            "vigencia_inicio": "",
+            "vigencia_fim":    "",
+        })
+
+    r.itens = resultados
+    r.add(f"🎯 Pronto! Selecione um item e clique 'Usar' para carregar os detalhes.")
+    return r
+
+
+def buscar_detalhe_item(compra_id: str, item_id: str) -> dict:
+    """
+    Busca detalhe de UM item específico (preço, fornecedor, CNPJ, vigência).
+    Chamado apenas quando o usuário clica 'Usar'.
+    """
+    cookies = _carregar_cookies()
+    if not cookies:
+        return {}
+    s = _sessao()
+    return _detalhe_item(s, compra_id, item_id)
     resultados = []
     for it in itens_base:
         try:

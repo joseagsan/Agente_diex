@@ -1217,47 +1217,63 @@ def page_gerar_req(reqs, ncs):
             if c_usar.button("➕ Adicionar item selecionado", use_container_width=True):
                 dado = mapa_opcoes.get(sel_label, {})
                 res  = dado.get("res", {})
-                v    = float(res.get("valor_unit_num") or 0)
+                # Busca detalhe do item selecionado (1 requisição apenas)
+                with st.spinner("Buscando detalhes do item..."):
+                    from pesquisa_compras import buscar_detalhe_item
+                    det = buscar_detalhe_item(
+                        str(res.get("compra_id", "")),
+                        str(res.get("item_id", ""))
+                    )
+                v    = float(det.get("valor_unit_num") or 0)
+                desc = det.get("descricao_det") or str(res.get("descricao", ""))
                 st.session_state.req_itens.append({
                     "ORD":            str(len(st.session_state.req_itens) + 1),
                     "ITEM":           str(res.get("numero_item", "")),
                     "SI":             "",
-                    "DESCRICAO_ITEM": str(res.get("descricao", "")),
-                    "UND":            str(res.get("und", "UN") or "UN"),
+                    "DESCRICAO_ITEM": desc,
+                    "UND":            str(det.get("und") or "UN"),
                     "QTD":            "1,000",
                     "VALOR_UNIT":     fmt(v),
                     "VALOR_TOTAL":    fmt(v),
                     "_total":         v,
                 })
-                st.session_state["_b2_forn"]   = str(dado.get("forn", ""))
-                st.session_state["_b2_cnpj"]   = str(dado.get("cnpj", ""))
+                st.session_state["_b2_forn"]   = str(det.get("fornecedor") or dado.get("forn", ""))
+                st.session_state["_b2_cnpj"]   = str(det.get("cnpj") or dado.get("cnpj", ""))
                 st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
                 st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                st.session_state["_b2_vig"]    = str(dado.get("vig", ""))
+                st.session_state["_b2_vig"]    = str(det.get("vigencia_fim") or dado.get("vig", ""))
 
-            if c_todos.button("✅ Adicionar TODOS os itens do fornecedor selecionado", use_container_width=True):
-                dado  = mapa_opcoes.get(sel_label, {})
+            if c_todos.button("✅ Usar TODOS do fornecedor selecionado", use_container_width=True):
+                dado     = mapa_opcoes.get(sel_label, {})
                 forn_sel = dado.get("forn", "")
-                cnpj_sel = dado.get("cnpj", "")
-                vig_sel  = dado.get("vig", "")
-                for res in grupos.get(forn_sel, []):
-                    v = float(res.get("valor_unit_num") or 0)
-                    st.session_state.req_itens.append({
-                        "ORD":            str(len(st.session_state.req_itens) + 1),
-                        "ITEM":           str(res.get("numero_item", "")),
-                        "SI":             "",
-                        "DESCRICAO_ITEM": str(res.get("descricao", "")),
-                        "UND":            str(res.get("und", "UN") or "UN"),
-                        "QTD":            "1,000",
-                        "VALOR_UNIT":     fmt(v),
-                        "VALOR_TOTAL":    fmt(v),
-                        "_total":         v,
-                    })
-                st.session_state["_b2_forn"]   = str(forn_sel)
-                st.session_state["_b2_cnpj"]   = str(cnpj_sel)
+                itens_forn_sel = grupos.get(forn_sel, [])
+                from pesquisa_compras import buscar_detalhe_item
+                with st.spinner(f"Carregando detalhes de {len(itens_forn_sel)} itens..."):
+                    primeiro_det = {}
+                    for res in itens_forn_sel:
+                        det = buscar_detalhe_item(
+                            str(res.get("compra_id", "")),
+                            str(res.get("item_id", ""))
+                        )
+                        if not primeiro_det:
+                            primeiro_det = det
+                        v = float(det.get("valor_unit_num") or 0)
+                        st.session_state.req_itens.append({
+                            "ORD":            str(len(st.session_state.req_itens) + 1),
+                            "ITEM":           str(res.get("numero_item", "")),
+                            "SI":             "",
+                            "DESCRICAO_ITEM": str(det.get("descricao_det") or res.get("descricao", "")),
+                            "UND":            str(det.get("und") or "UN"),
+                            "QTD":            "1,000",
+                            "VALOR_UNIT":     fmt(v),
+                            "VALOR_TOTAL":    fmt(v),
+                            "_total":         v,
+                        })
+                st.session_state["_b2_forn"]   = str(primeiro_det.get("fornecedor") or forn_sel)
+                st.session_state["_b2_cnpj"]   = str(primeiro_det.get("cnpj") or dado.get("cnpj",""))
                 st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao", ""))
                 st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                st.session_state["_b2_vig"]    = str(vig_sel)
+                st.session_state["_b2_vig"]    = str(primeiro_det.get("vigencia_fim") or "")
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
