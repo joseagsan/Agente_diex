@@ -1183,13 +1183,12 @@ def page_gerar_req(reqs, ncs):
                 grupos.setdefault(forn, []).append(res)
 
             def _aplicar_fornecedor(forn, cnpj_forn, vig_fim):
-                """Salva dados do fornecedor e incrementa versão para forçar rerender."""
-                st.session_state["_b2_forn"]    = forn
-                st.session_state["_b2_cnpj"]    = cnpj_forn
-                st.session_state["_b2_pregao"]  = st.session_state.get("pesq_pregao", "")
-                st.session_state["_b2_ug"]      = st.session_state.get("pesq_uasg", UG_PADRAO)
-                st.session_state["_b2_vig"]     = vig_fim
-                st.session_state["_b2_ver"]     = st.session_state.get("_b2_ver", 0) + 1
+                """Salva dados do fornecedor. O rerun natural do botão aplica."""
+                st.session_state["_b2_forn"]   = forn
+                st.session_state["_b2_cnpj"]   = cnpj_forn
+                st.session_state["_b2_pregao"] = st.session_state.get("pesq_pregao", "")
+                st.session_state["_b2_ug"]     = st.session_state.get("pesq_uasg", UG_PADRAO)
+                st.session_state["_b2_vig"]    = vig_fim
 
             for gi, (forn, itens_forn) in enumerate(grupos.items()):
                 cnpj_forn = itens_forn[0].get("cnpj", "")
@@ -1240,29 +1239,28 @@ def page_gerar_req(reqs, ncs):
     st.divider()
     st.subheader("2. Fornecedor / Pregão")
 
-    # Debug — remove depois de confirmar funcionamento
-    with st.expander("🐛 DEBUG session state b2", expanded=False):
-        st.write({k: v for k, v in st.session_state.items()
-                  if str(k).startswith("_b2")})
-
     _b2_forn   = st.session_state.get("_b2_forn", "")
     _b2_cnpj   = st.session_state.get("_b2_cnpj", "")
     _b2_pregao = st.session_state.get("_b2_pregao", "")
     _b2_ug     = st.session_state.get("_b2_ug", UG_PADRAO)
     _b2_vig    = st.session_state.get("_b2_vig", "")
-    _b2v       = st.session_state.get("_b2_ver", 0)
+
+    if _b2_forn:
+        st.success(f"🏢 **{_b2_forn}** | {_b2_cnpj} | Pregão: {_b2_pregao} | Vigência: {_b2_vig}")
+    else:
+        st.caption("⬆️ Use ➕ Usar na pesquisa acima para preencher automaticamente.")
 
     b2_c1, b2_c2 = st.columns(2)
-    b2_c1.text_input("Fornecedor (Razão Social)", value=_b2_forn, key=f"b2_forn_{_b2v}")
-    b2_c2.text_input("CNPJ", value=_b2_cnpj, key=f"b2_cnpj_{_b2v}")
+    b2_forn_edit = b2_c1.text_input("Fornecedor (Razão Social)", value=_b2_forn, key="b2_forn_inp")
+    b2_cnpj_edit = b2_c2.text_input("CNPJ", value=_b2_cnpj, key="b2_cnpj_inp")
 
     b2_m1, b2_m2, b2_m3, b2_m4 = st.columns([2, 2, 1, 2])
-    b2_m1.selectbox("Modalidade",
+    b2_modal_edit = b2_m1.selectbox("Modalidade",
                     ["PREGÃO", "CARONA", "DISPENSA", "INEXIGIBILIDADE", "SUPRIMENTO DE FUNDOS"],
-                    key=f"b2_modal_{_b2v}")
-    b2_m2.text_input("Nº Pregão/ARP",   value=_b2_pregao, key=f"b2_pregao_{_b2v}")
-    b2_m3.text_input("UG",              value=_b2_ug,     key=f"b2_ug_{_b2v}")
-    b2_m4.text_input("Vigência da ATA", value=_b2_vig,    key=f"b2_vig_{_b2v}")
+                    key="b2_modal_inp")
+    b2_pregao_edit = b2_m2.text_input("Nº Pregão/ARP",   value=_b2_pregao, key="b2_pregao_inp")
+    b2_ug_edit     = b2_m3.text_input("UG",              value=_b2_ug,     key="b2_ug_inp")
+    b2_vig_edit    = b2_m4.text_input("Vigência da ATA", value=_b2_vig,    key="b2_vig_inp")
 
     # ── 3. Itens
     st.divider()
@@ -1335,20 +1333,14 @@ def page_gerar_req(reqs, ncs):
             try:
                 from gerador import gerar_para_bytes
 
-                # Lê Bloco 2 pelo widget atual (chave versionada)
-                _bv = st.session_state.get("_b2_ver", 0)
-                mod_tipo   = st.session_state.get(f"b2_modal_{_bv}", "PREGÃO")
-                mod_num    = st.session_state.get(f"b2_pregao_{_bv}", "")
-                mod_ug     = st.session_state.get(f"b2_ug_{_bv}", "")
-                modalidade = f"{mod_tipo} - {mod_num} {mod_ug}".strip(" -")
-
+                modalidade = f"{st.session_state.get('b2_modal_inp','PREGÃO')} - {st.session_state.get('b2_pregao_inp','')} {st.session_state.get('b2_ug_inp','')}".strip(" -")
                 total_geral = sum(i["_total"] for i in itens)
                 campos_finais = {
                     **campos,
-                    "FORNECEDOR_NOME": st.session_state.get(f"b2_forn_{_bv}", ""),
-                    "FORNECEDOR_CNPJ": _formatar_cnpj(st.session_state.get(f"b2_cnpj_{_bv}", "")),
+                    "FORNECEDOR_NOME": st.session_state.get("b2_forn_inp", ""),
+                    "FORNECEDOR_CNPJ": _formatar_cnpj(st.session_state.get("b2_cnpj_inp", "")),
                     "MODALIDADE":      modalidade,
-                    "VIGENCIA_DA_ATA": st.session_state.get(f"b2_vig_{_bv}", ""),
+                    "VIGENCIA_DA_ATA": st.session_state.get("b2_vig_inp", ""),
                     "TOTAL":           fmt(total_geral),
                 }
                 itens_limpos = [{k: v for k, v in i.items() if not k.startswith("_")} for i in itens]
