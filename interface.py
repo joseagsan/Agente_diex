@@ -1520,6 +1520,7 @@ def page_gerar_req(reqs, ncs):
                                 st.session_state["_b2_pregao"] = pregao_atual
                                 st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
                                 st.session_state["_b2_vig"]    = vig_grp
+                                st.session_state["_b2_ver"]    = st.session_state.get("_b2_ver", 0) + 1
 
             # Se forn_map está carregado, não precisa mais do expander flat abaixo
             forn_map = st.session_state.get("pesq_forn_map", {})
@@ -1585,6 +1586,7 @@ def page_gerar_req(reqs, ncs):
                         st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao",""))
                         st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
                         st.session_state["_b2_vig"]    = str(det.get("vigencia_fim",""))
+                        st.session_state["_b2_ver"]    = st.session_state.get("_b2_ver", 0) + 1
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
@@ -1601,17 +1603,19 @@ def page_gerar_req(reqs, ncs):
     else:
         st.caption("⬆️ Use ➕ Usar na pesquisa acima para preencher automaticamente.")
 
+    # Chave versionada garante que value= é respeitado após auto-fill
+    _b2v = st.session_state.get("_b2_ver", 0)
     b2_c1, b2_c2 = st.columns(2)
-    b2_forn_edit = b2_c1.text_input("Fornecedor (Razão Social)", value=_b2_forn, key="b2_forn_inp")
-    b2_cnpj_edit = b2_c2.text_input("CNPJ", value=_b2_cnpj, key="b2_cnpj_inp")
+    b2_forn_edit = b2_c1.text_input("Fornecedor (Razão Social)", value=_b2_forn, key=f"b2_forn_{_b2v}")
+    b2_cnpj_edit = b2_c2.text_input("CNPJ",                     value=_b2_cnpj, key=f"b2_cnpj_{_b2v}")
 
     b2_m1, b2_m2, b2_m3, b2_m4 = st.columns([2, 2, 1, 2])
-    b2_modal_edit = b2_m1.selectbox("Modalidade",
-                    ["PREGÃO", "CARONA", "DISPENSA", "INEXIGIBILIDADE", "SUPRIMENTO DE FUNDOS"],
-                    key="b2_modal_inp")
-    b2_pregao_edit = b2_m2.text_input("Nº Pregão/ARP",   value=_b2_pregao, key="b2_pregao_inp")
-    b2_ug_edit     = b2_m3.text_input("UG",              value=_b2_ug,     key="b2_ug_inp")
-    b2_vig_edit    = b2_m4.text_input("Vigência da ATA", value=_b2_vig,    key="b2_vig_inp")
+    b2_modal_edit  = b2_m1.selectbox("Modalidade",
+                     ["PREGÃO", "CARONA", "DISPENSA", "INEXIGIBILIDADE", "SUPRIMENTO DE FUNDOS"],
+                     key=f"b2_modal_{_b2v}")
+    b2_pregao_edit = b2_m2.text_input("Nº Pregão/ARP",   value=_b2_pregao, key=f"b2_pregao_{_b2v}")
+    b2_ug_edit     = b2_m3.text_input("UG",              value=_b2_ug,     key=f"b2_ug_{_b2v}")
+    b2_vig_edit    = b2_m4.text_input("Vigência da ATA", value=_b2_vig,    key=f"b2_vig_{_b2v}")
 
     # ── 3. Itens
     st.divider()
@@ -1622,6 +1626,15 @@ def page_gerar_req(reqs, ncs):
         st.session_state.setdefault(k, v)
 
     # ── Seletor ND / SI (fora do form para cascata) ───────────────────
+    # Pré-seleciona ND a partir da NC selecionada (ex: NC com ND=339030)
+    nc_nd_raw = nc_d.get("ND", "").strip()
+    if nc_nd_raw:
+        nd_match = next((k for k in SUBITENS if k.startswith(nc_nd_raw)), None)
+        nd_prev_key = f"_fi_nd_from_nc_{nc_sel}"
+        if nd_match and st.session_state.get("_fi_nd_prev_nc") != nd_prev_key:
+            st.session_state["_fi_nd"] = nd_match
+            st.session_state["_fi_nd_prev_nc"] = nd_prev_key
+
     nd_keys = ["— sem ND —"] + list(SUBITENS.keys())
     snd1, snd2 = st.columns(2)
     nd_sel = snd1.selectbox("ND (Natureza de Despesa)", nd_keys, key="_fi_nd")
