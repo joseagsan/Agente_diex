@@ -522,9 +522,15 @@ def page_dashboard(ncs, reqs):
                 pass
         if rows:
             df_m = pd.DataFrame(rows).groupby(["Mês", "Ord"]).sum().reset_index().sort_values("Ord")
+            df_m["Recebido_fmt"]  = df_m["Recebido"].apply(fmt)
+            df_m["Empenhado_fmt"] = df_m["Empenhado"].apply(fmt)
             fig = go.Figure()
-            fig.add_bar(x=df_m["Mês"], y=df_m["Recebido"],  name="Recebido",  marker_color=t["bar_recv"])
-            fig.add_bar(x=df_m["Mês"], y=df_m["Empenhado"], name="Empenhado", marker_color=t["bar_emp"])
+            fig.add_bar(x=df_m["Mês"], y=df_m["Recebido"],  name="Recebido",  marker_color=t["bar_recv"],
+                        customdata=df_m["Recebido_fmt"],
+                        hovertemplate="<b>%{x}</b><br>Recebido: <b>%{customdata}</b><extra></extra>")
+            fig.add_bar(x=df_m["Mês"], y=df_m["Empenhado"], name="Empenhado", marker_color=t["bar_emp"],
+                        customdata=df_m["Empenhado_fmt"],
+                        hovertemplate="<b>%{x}</b><br>Empenhado: <b>%{customdata}</b><extra></extra>")
             fig.update_layout(height=300, barmode="group", **_cl())
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -551,10 +557,13 @@ def page_dashboard(ncs, reqs):
                      .groupby("OP")["Saldo"].sum().reset_index()
                      .query("Saldo > 0").sort_values("Saldo"))
             if not df_op.empty:
+                df_op["Saldo_fmt"] = df_op["Saldo"].apply(fmt)
                 fig = px.bar(df_op, x="Saldo", y="OP", orientation="h",
                              color="Saldo", color_continuous_scale=["#1a4a2e", t["bar_emp"]],
+                             custom_data=["Saldo_fmt"],
                              labels={"Saldo": "R$", "OP": ""})
                 fig.update_coloraxes(showscale=False)
+                fig.update_traces(hovertemplate="<b>%{y}</b><br>Saldo: <b>%{customdata[0]}</b><extra></extra>")
                 fig.update_layout(height=320, **_cl())
                 st.plotly_chart(fig, use_container_width=True)
             else:
@@ -568,9 +577,12 @@ def page_dashboard(ncs, reqs):
                                     "Empenhado": parse(nc.get("EMPENHADO", 0))} for nc in ncs_f])
                     .groupby("ORGÃO").sum().reset_index()
                     .melt(id_vars="ORGÃO", var_name="Tipo", value_name="Valor"))
+            df_o["Valor_fmt"] = df_o["Valor"].apply(fmt)
             fig = px.bar(df_o, x="ORGÃO", y="Valor", color="Tipo", barmode="group",
                          color_discrete_map={"Recebido": t["bar_recv"], "Empenhado": t["bar_emp"]},
+                         custom_data=["Valor_fmt", "Tipo"],
                          labels={"Valor": "R$", "ORGÃO": ""})
+            fig.update_traces(hovertemplate="<b>%{x}</b><br>%{customdata[1]}: <b>%{customdata[0]}</b><extra></extra>")
             fig.update_layout(height=320, **_cl())
             st.plotly_chart(fig, use_container_width=True)
 
@@ -585,8 +597,11 @@ def page_dashboard(ncs, reqs):
                     .sort_values("Valor", ascending=False))
             cores = {"Pendente": "#fbbf24", "Enviada": "#a78bfa", "Aprovada": "#60a5fa",
                      "Empenhada": t["bar_recv"], "Liquidada": t["bar_emp"], "Paga": t["bar_saldo"]}
+            df_s["Valor_fmt"] = df_s["Valor"].apply(fmt)
             fig = px.bar(df_s, x="Situação", y="Valor", color="Situação",
-                         color_discrete_map=cores, labels={"Valor": "R$", "Situação": ""})
+                         color_discrete_map=cores, custom_data=["Valor_fmt"],
+                         labels={"Valor": "R$", "Situação": ""})
+            fig.update_traces(hovertemplate="<b>%{x}</b><br>Total: <b>%{customdata[0]}</b><extra></extra>")
             fig.update_layout(height=300, **_cl(), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
@@ -614,9 +629,18 @@ def page_dashboard(ncs, reqs):
                                   "Saldo": parse(nc.get("SALDO NC", 0))} for nc in ncs_f])
                   .groupby("OP").sum().reset_index().sort_values("Recebido", ascending=False))
         fig = go.Figure()
-        fig.add_bar(x=df_vop["OP"], y=df_vop["Recebido"],  name="Recebido",  marker_color=t["bar_recv"])
-        fig.add_bar(x=df_vop["OP"], y=df_vop["Empenhado"], name="Empenhado", marker_color="#fbbf24")
-        fig.add_bar(x=df_vop["OP"], y=df_vop["Saldo"],     name="Saldo",     marker_color=t["bar_emp"])
+        df_vop["Recebido_fmt"]  = df_vop["Recebido"].apply(fmt)
+        df_vop["Empenhado_fmt"] = df_vop["Empenhado"].apply(fmt)
+        df_vop["Saldo_fmt"]     = df_vop["Saldo"].apply(fmt)
+        fig.add_bar(x=df_vop["OP"], y=df_vop["Recebido"],  name="Recebido",  marker_color=t["bar_recv"],
+                    customdata=df_vop["Recebido_fmt"],
+                    hovertemplate="<b>%{x}</b><br>Recebido: <b>%{customdata}</b><extra></extra>")
+        fig.add_bar(x=df_vop["OP"], y=df_vop["Empenhado"], name="Empenhado", marker_color="#fbbf24",
+                    customdata=df_vop["Empenhado_fmt"],
+                    hovertemplate="<b>%{x}</b><br>Empenhado: <b>%{customdata}</b><extra></extra>")
+        fig.add_bar(x=df_vop["OP"], y=df_vop["Saldo"],     name="Saldo",     marker_color=t["bar_emp"],
+                    customdata=df_vop["Saldo_fmt"],
+                    hovertemplate="<b>%{x}</b><br>Saldo: <b>%{customdata}</b><extra></extra>")
         fig.update_layout(barmode="group", height=300, **_cl())
         st.plotly_chart(fig, use_container_width=True)
 
