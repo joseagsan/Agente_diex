@@ -314,11 +314,11 @@ NAV = [
     ("📊", "Dashboard",        "dashboard"),
     ("📋", "Notas de Crédito", "ncs"),
     ("📝", "Requisições",      "reqs"),
-    ("📄", "Lançar Documento", "pdf"),
     ("📃", "Gerar REQ",        "gerar_req"),
     ("📥", "Importar Dados",   "importar"),
-    ("📈", "Relatórios",       "relatorios"),
+    ("📄", "Lançar Documento", "pdf"),
     ("🤖", "Assistente",       "assistente"),
+    ("📈", "Relatórios",       "relatorios"),
 ]
 LINK_SHEETS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID_NC}/edit"
 
