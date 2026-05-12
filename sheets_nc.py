@@ -174,7 +174,7 @@ def recalcular_empenhados(reqs: list[dict]) -> dict[str, str]:
     totais: dict[str, float] = defaultdict(float)
     for r in reqs:
         if r.get("SITUAÇÃO") == "Empenhada" and r.get("NC"):
-            totais[r["NC"]] += parse(r.get("VALOR", 0))
+            totais[r["NC"]] += parse_moeda(r.get("VALOR", 0))
 
     resultados = {}
     for nc_num, total in totais.items():
@@ -223,7 +223,7 @@ def _set_nc_empenhado(nc_num: str, total_empenhado: float) -> None:
     for i, row in enumerate(todas[1:], start=2):
         val_nc = row[col_nc - 1] if len(row) >= col_nc else ""
         if str(val_nc).strip() == str(nc_num).strip():
-            rec = parse(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
+            rec = parse_moeda(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
             pct = f"{(total_empenhado / rec * 100):.2f}%".replace(".", ",") if rec else "0,00%"
             batch = [{"range": rowcol_to_a1(i, col_emp), "values": [[format_moeda(total_empenhado)]]}]
             if col_pemp and "EMP %" not in formula_cols:
@@ -272,9 +272,9 @@ def atualizar_nc_empenhado(nc_num: str, valor_req: float) -> None:
     for i, row in enumerate(todas[1:], start=2):
         val_nc = row[col_nc - 1] if len(row) >= col_nc else ""
         if str(val_nc).strip() == str(nc_num).strip():
-            emp_atual = parse(row[col_emp - 1]) if len(row) >= col_emp else 0.0
+            emp_atual = parse_moeda(row[col_emp - 1]) if len(row) >= col_emp else 0.0
             novo_emp  = emp_atual + valor_req
-            rec       = parse(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
+            rec       = parse_moeda(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
             pct       = f"{(novo_emp / rec * 100):.2f}%" if rec else "0,00%"
 
             batch = [{"range": rowcol_to_a1(i, col_emp), "values": [[format_moeda(novo_emp)]]}]
