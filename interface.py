@@ -1293,7 +1293,7 @@ def page_gerar_req(reqs, ncs):
                   delta_color="normal" if saldo_apos >= 0 else "inverse")
 
     # ── Frases cadastradas (fora do form para reatividade)
-    col_i, col_j = st.columns(2)
+    col_i, col_j, col_f = st.columns(3)
     with col_i:
         st.caption("📝 Introdução")
         frases_intro = _frases("INTRO")
@@ -1350,6 +1350,34 @@ def page_gerar_req(reqs, ncs):
                     st.cache_data.clear()
                     st.rerun()
 
+    with col_f:
+        st.caption("📝 Finalidade / Objeto")
+        frases_final = _frases("FINAL")
+        sel_final = st.selectbox("Frase padrão", frases_final, key="sel_final_frase",
+                                  label_visibility="collapsed")
+        if sel_final != "— escrever manualmente —":
+            st.session_state["_final_txt"] = sel_final
+        elif "_final_txt" not in st.session_state:
+            st.session_state["_final_txt"] = ""
+
+        with st.expander("➕ Cadastrar nova frase de Finalidade"):
+            nova_final = st.text_area("Texto", key="nova_final_txt", height=80)
+            if st.button("💾 Salvar", key="btn_salvar_final"):
+                if nova_final.strip():
+                    from sheets_nc import adicionar_frase
+                    adicionar_frase("FINAL", nova_final.strip())
+                    st.cache_data.clear()
+                    st.success("Frase salva!")
+                    st.rerun()
+
+        if sel_final != "— escrever manualmente —":
+            with st.expander("🗑️ Excluir esta frase"):
+                if st.button("Confirmar exclusão", key="btn_del_final"):
+                    from sheets_nc import excluir_frase
+                    excluir_frase("FINAL", sel_final)
+                    st.cache_data.clear()
+                    st.rerun()
+
     # ── Bloco 1: Dados manuais (NC, req#, data, assunto, intro, just)
     st.subheader("1. Dados da Requisição")
     with st.form("f_campos_req"):
@@ -1372,7 +1400,9 @@ def page_gerar_req(reqs, ncs):
         assunto      = st.text_input("Assunto", value=_v("FINALIDADE", "FINALIDADE"))
         intro        = st.text_area("Introdução",  value=st.session_state.get("_intro_txt", ""), height=80)
         justificativa = st.text_area("Justificativa", value=st.session_state.get("_just_txt", ""), height=80)
-        finalidade   = st.text_area("Finalidade / Objeto", value=_v("FINALIDADE", "FINALIDADE"), height=60)
+        finalidade   = st.text_area("Finalidade / Objeto",
+                                    value=st.session_state.get("_final_txt") or _v("FINALIDADE", "FINALIDADE"),
+                                    height=60)
 
         salvar_basico = st.form_submit_button("✅ Confirmar Dados Básicos", type="primary", use_container_width=True)
 
@@ -1503,10 +1533,11 @@ def page_gerar_req(reqs, ncs):
                                 st.error(f"❌ Req vinculada a **{forn_atual}**.")
                             else:
                                 v = float(dados.get("valor_unit_num") or 0)
+                                _si_grp = st.session_state.get("_fi_si", "")
                                 st.session_state.req_itens.append({
                                     "ORD":            str(len(st.session_state.req_itens) + 1),
                                     "ITEM":           str(num),
-                                    "SI":             "",
+                                    "SI":             "" if _si_grp == "— sem SI —" else _si_grp,
                                     "DESCRICAO_ITEM": dados.get("descricao_det") or dados.get("descricao",""),
                                     "UND":            str(dados.get("und") or "UN"),
                                     "QTD":            "1,000",
@@ -1569,10 +1600,11 @@ def page_gerar_req(reqs, ncs):
                     else:
                         v    = float(det.get("valor_unit_num") or 0)
                         desc = det.get("descricao_det") or str(res.get("descricao",""))
+                        _si_usar = st.session_state.get("_fi_si", "")
                         st.session_state.req_itens.append({
                             "ORD":            str(len(st.session_state.req_itens) + 1),
                             "ITEM":           str(num),
-                            "SI":             "",
+                            "SI":             "" if _si_usar == "— sem SI —" else _si_usar,
                             "DESCRICAO_ITEM": desc,
                             "UND":            str(det.get("und") or "UN"),
                             "QTD":            "1,000",

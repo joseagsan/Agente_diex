@@ -47,6 +47,10 @@ def _consolidar_runs(para) -> None:
         run.text = ""
 
 
+# Campos que devem ser substituídos sem negrito, independente do template
+_CAMPOS_SEM_NEGRITO = {"JUSTIFICATIVA", "INTRO_1", "FINALIDADE", "ASSUNTO"}
+
+
 def _substituir_em_paragrafo(para, dados: dict) -> bool:
     texto = _texto_paragrafo(para)
     if "{{" not in texto:
@@ -65,6 +69,8 @@ def _substituir_em_paragrafo(para, dados: dict) -> bool:
 
     if para.runs:
         para.runs[0].text = novo_texto
+        if any(c in _CAMPOS_SEM_NEGRITO for c in campos_encontrados):
+            para.runs[0].bold = False
     return True
 
 
