@@ -478,64 +478,139 @@ def page_dashboard(ncs, reqs):
 # ── NCs ───────────────────────────────────────────────────────────────────────
 def page_ncs(ncs):
     st.title("📋 Notas de Crédito")
-
-    with st.expander("🔍 Filtros", expanded=False):
-        f1, f2, f3 = st.columns(3)
-        f_situ  = f1.multiselect("Status",   ["OK", "EM TELA"], default=["OK", "EM TELA"])
-        f_org   = f2.multiselect("Órgão",    sorted({nc.get("ORGÃO", "") for nc in ncs if nc.get("ORGÃO")}))
-        f_op    = f3.multiselect("Operação", sorted({nc.get("OP", "")    for nc in ncs if nc.get("OP")}))
-        f4, f5, f6 = st.columns(3)
-        f_nd    = f4.multiselect("ND",       sorted({nc.get("ND", "")    for nc in ncs if nc.get("ND")}))
-        f_pi    = f5.multiselect("PI",       sorted({nc.get("PI", "")    for nc in ncs if nc.get("PI")}))
-        f_prazo = f6.selectbox("Prazo",      ["Todos", "Vencidas", "Vencem em 7 dias", "Vencem em 30 dias"])
-
     hoje = date.today()
+
+    def _dias_prazo(nc):
+        try:
+            return (datetime.strptime(nc["PRAZO"], "%d/%m/%Y").date() - hoje).days
+        except Exception:
+            return None
+
+    def _parse_pct(s):
+        try:
+            return float(str(s).replace("%", "").replace(",", ".").strip() or 0)
+        except Exception:
+            return 0.0
+
+    def _badge(nc):
+        if nc.get("SITU") != "EM TELA": return "🟢"
+        d = _dias_prazo(nc)
+        if d is None: return "🔵"
+        if d < 0:     return "🔴"
+        if d <= 7:    return "🟠"
+        if d <= 30:   return "🟡"
+        return "🔵"
+
+    # ── KPI cards ─────────────────────────────────────────────────────
+    em_tela  = [nc for nc in ncs if nc.get("SITU") == "EM TELA"]
+    vencidas = sum(1 for nc in em_tela if (d := _dias_prazo(nc)) is not None and d < 0)
+    venc7    = sum(1 for nc in em_tela if (d := _dias_prazo(nc)) is not None and 0 <= d <= 7)
+    t_receb  = sum(parse(nc.get("RECEBIDO", 0)) for nc in ncs)
+    t_saldo  = sum(parse(nc.get("SALDO NC",  0)) for nc in ncs)
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("📋 Total NCs",   len(ncs))
+    k2.metric("💰 Recebido",    fmt(t_receb))
+    k3.metric("🏦 Saldo",       fmt(t_saldo))
+    k4.metric("📺 Em Tela",     len(em_tela))
+    k5.metric("⚠️ Urgentes",    f"{venc7} vencendo",
+              delta=f"{vencidas} vencidas" if vencidas else None,
+              delta_color="inverse")
+
+    st.divider()
+
+    # ── Filtros rápidos ────────────────────────────────────────────────
+    fc1, fc2 = st.columns([3, 2])
+    busca = fc1.text_input("Busca", placeholder="🔍 NC, Órgão, Finalidade...",
+                           key="nc_busca", label_visibility="collapsed")
+    status_opt = fc2.radio("Status", ["Todos", "🟢 OK", "📺 EM TELA", "🔴 Vencidas", "🟠 Vence 7d"],
+                           horizontal=True, key="nc_status", label_visibility="collapsed")
+
+    with st.expander("🔧 Filtros avançados"):
+        fa1, fa2, fa3, fa4 = st.columns(4)
+        f_org = fa1.multiselect("Órgão",    sorted({nc.get("ORGÃO","") for nc in ncs if nc.get("ORGÃO")}))
+        f_op  = fa2.multiselect("Operação", sorted({nc.get("OP","")    for nc in ncs if nc.get("OP")}))
+        f_nd  = fa3.multiselect("ND",       sorted({nc.get("ND","")    for nc in ncs if nc.get("ND")}))
+        f_pi  = fa4.multiselect("PI",       sorted({nc.get("PI","")    for nc in ncs if nc.get("PI")}))
+
+    # ── Aplicar filtros ────────────────────────────────────────────────
     filtradas = []
     for nc in ncs:
-        if f_situ  and nc.get("SITU")  not in f_situ:  continue
-        if f_org   and nc.get("ORGÃO") not in f_org:   continue
-        if f_op    and nc.get("OP")    not in f_op:    continue
-        if f_nd    and nc.get("ND")    not in f_nd:    continue
-        if f_pi    and nc.get("PI")    not in f_pi:    continue
-        if f_prazo != "Todos":
-            if nc.get("SITU") != "EM TELA":
-                continue
-            try:
-                dias = (datetime.strptime(nc.get("PRAZO", ""), "%d/%m/%Y").date() - hoje).days
-                if f_prazo == "Vencidas"           and dias >= 0:          continue
-                if f_prazo == "Vencem em 7 dias"   and not 0 <= dias <= 7:  continue
-                if f_prazo == "Vencem em 30 dias"  and not 0 <= dias <= 30: continue
-            except Exception:
-                continue
+        d = _dias_prazo(nc)
+        em = nc.get("SITU") == "EM TELA"
+        if status_opt == "🟢 OK"       and nc.get("SITU") != "OK":                          continue
+        if status_opt == "📺 EM TELA"  and not em:                                           continue
+        if status_opt == "🔴 Vencidas" and not (em and d is not None and d < 0):             continue
+        if status_opt == "🟠 Vence 7d" and not (em and d is not None and 0 <= d <= 7):       continue
+        if f_org and nc.get("ORGÃO") not in f_org: continue
+        if f_op  and nc.get("OP")    not in f_op:  continue
+        if f_nd  and nc.get("ND")    not in f_nd:  continue
+        if f_pi  and nc.get("PI")    not in f_pi:  continue
+        if busca:
+            haystack = " ".join(str(v) for v in nc.values()).lower()
+            if busca.lower() not in haystack: continue
         filtradas.append(nc)
 
-    b1, b2, b3 = st.columns([1, 1, 3])
-    with b1:
-        if st.button("➕ Nova NC", type="primary", use_container_width=True):
-            st.session_state["form_nc"] = not st.session_state.get("form_nc", False)
-    with b2:
-        st.markdown(
-            f'<a href="{LINK_SHEETS}" target="_blank">'
-            f'<button style="background:transparent;color:#64748b;border:1px solid #1a2540;'
-            f'border-radius:6px;padding:6px 12px;font-size:.85rem;cursor:pointer;width:100%;">'
-            f'📊 Planilha</button></a>',
-            unsafe_allow_html=True,
-        )
-    with b3:
-        saldo_f = sum(parse(nc.get("SALDO NC", 0)) for nc in filtradas)
-        receb_f = sum(parse(nc.get("RECEBIDO", 0)) for nc in filtradas)
-        st.info(f"📋 **{len(filtradas)}** NCs · Recebido: **{fmt(receb_f)}** · Saldo: **{fmt(saldo_f)}**")
+    # ── Barra de ações ─────────────────────────────────────────────────
+    ac1, ac2, ac3 = st.columns([1, 1, 4])
+    if ac1.button("➕ Nova NC", type="primary", use_container_width=True):
+        st.session_state["form_nc"] = not st.session_state.get("form_nc", False)
+    ac2.markdown(
+        f'<a href="{LINK_SHEETS}" target="_blank">'
+        f'<button style="background:transparent;color:#64748b;border:1px solid #334155;'
+        f'border-radius:6px;padding:8px 12px;font-size:.85rem;cursor:pointer;width:100%;">'
+        f'📊 Planilha</button></a>', unsafe_allow_html=True)
+    saldo_f = sum(parse(nc.get("SALDO NC", 0)) for nc in filtradas)
+    receb_f = sum(parse(nc.get("RECEBIDO", 0)) for nc in filtradas)
+    ac3.info(f"**{len(filtradas)}** de {len(ncs)} NCs · Recebido: **{fmt(receb_f)}** · Saldo: **{fmt(saldo_f)}**")
 
     if st.session_state.get("form_nc"):
         _form_nc()
 
-    if filtradas:
-        cols = [c for c in ["ORD", "SITU", "ORGÃO", "DATA NC", "NC", "PI", "ND", "FINALIDADE",
-                             "OP", "PRAZO", "DIAS", "RECEBIDO", "SALDO NC", "EMPENHADO", "EMP %", "SITUAÇÃO"]
-                if c in pd.DataFrame(filtradas).columns]
-        st.dataframe(pd.DataFrame(filtradas)[cols], use_container_width=True, hide_index=True)
-    else:
-        st.info("Nenhuma NC encontrada.")
+    if not filtradas:
+        st.info("Nenhuma NC encontrada com os filtros aplicados.")
+        return
+
+    # ── Tabela enriquecida ─────────────────────────────────────────────
+    rows = []
+    for nc in filtradas:
+        d = _dias_prazo(nc)
+        rows.append({
+            "":         _badge(nc),
+            "NC":       nc.get("NC", ""),
+            "ORGÃO":    nc.get("ORGÃO", ""),
+            "DATA NC":  nc.get("DATA NC", ""),
+            "PRAZO":    nc.get("PRAZO", ""),
+            "RESTAM":   d if d is not None else 9999,
+            "RECEBIDO": parse(nc.get("RECEBIDO", 0)),
+            "SALDO NC": parse(nc.get("SALDO NC",  0)),
+            "EMP %":    _parse_pct(nc.get("EMP %", "0")),
+            "EM TELA %":_parse_pct(nc.get("EM TELA %", "0")),
+            "SITUAÇÃO": nc.get("SITUAÇÃO", ""),
+        })
+
+    df = pd.DataFrame(rows)
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "":          st.column_config.TextColumn("",        width=35),
+            "NC":        st.column_config.TextColumn("NC",      width=130),
+            "ORGÃO":     st.column_config.TextColumn("Órgão",   width=110),
+            "DATA NC":   st.column_config.TextColumn("Data NC", width=90),
+            "PRAZO":     st.column_config.TextColumn("Prazo",   width=90),
+            "RESTAM":    st.column_config.NumberColumn("Restam", width=75,
+                             help="Dias restantes até o prazo"),
+            "RECEBIDO":  st.column_config.NumberColumn("Recebido",  format="R$ %.2f", width=130),
+            "SALDO NC":  st.column_config.NumberColumn("Saldo NC",  format="R$ %.2f", width=130),
+            "EMP %":     st.column_config.ProgressColumn("Emp %",
+                             format="%.1f%%", min_value=0, max_value=100, width=95),
+            "EM TELA %": st.column_config.ProgressColumn("Em Tela %",
+                             format="%.1f%%", min_value=0, max_value=100, width=95),
+            "SITUAÇÃO":  st.column_config.TextColumn("Situação", width=120),
+        },
+    )
 
 
 def _form_nc():
