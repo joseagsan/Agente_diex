@@ -905,15 +905,13 @@ def page_reqs(reqs, ncs):
         return
 
     # KPIs rápidos
-    k1, k2, k3, k4 = st.columns(4)
+    k1, k2, k3 = st.columns(3)
     total_val  = sum(parse(r.get("VALOR", 0)) for r in filtradas)
     pendentes  = sum(1 for r in filtradas if r.get("SITUAÇÃO") == "Pendente")
     empenhadas = sum(1 for r in filtradas if r.get("SITUAÇÃO") == "Empenhada")
-    pagas      = sum(1 for r in filtradas if r.get("SITUAÇÃO") == "Paga")
-    k1.metric("💰 Total", fmt(total_val))
+    k1.metric("💰 Total",      fmt(total_val))
     k2.metric("⏳ Pendentes",  pendentes)
     k3.metric("📌 Empenhadas", empenhadas)
-    k4.metric("✅ Pagas",      pagas)
 
     def _badge_req(sit):
         return {"Pendente": "🟡", "Enviada": "🔵", "Aprovada": "🟢",
@@ -956,7 +954,7 @@ def page_reqs(reqs, ncs):
                                   "Situação", width=110,
                                   options=["Pendente", "Empenhada"]),
             "ENTRADA NA BDA": st.column_config.TextColumn("Entrada SALC", width=110),
-            "NE":             st.column_config.TextColumn("NE",           width=90,  disabled=True),
+            "NE":             st.column_config.TextColumn("NE",           width=90),
             "OBS":            st.column_config.TextColumn("Obs",          width=120, disabled=True),
         },
         key="req_editor",
@@ -965,16 +963,18 @@ def page_reqs(reqs, ncs):
     # Detecta mudanças e oferece salvar
     changed_rows = []
     for i, (orig, novo) in enumerate(zip(rows, edited.to_dict("records"))):
-        if orig["SITUAÇÃO"] != novo["SITUAÇÃO"] or orig["ENTRADA NA BDA"] != novo["ENTRADA NA BDA"]:
-            changed_rows.append((i, orig["REQ"], novo["SITUAÇÃO"], novo["ENTRADA NA BDA"]))
+        if (orig["SITUAÇÃO"]        != novo["SITUAÇÃO"] or
+            orig["ENTRADA NA BDA"]  != novo["ENTRADA NA BDA"] or
+            orig["NE"]              != novo["NE"]):
+            changed_rows.append((i, orig["REQ"], novo["SITUAÇÃO"], novo["ENTRADA NA BDA"], novo["NE"]))
 
     if changed_rows:
         st.info(f"✏️ {len(changed_rows)} linha(s) alterada(s). Clique para salvar.")
         if st.button("💾 Salvar alterações", type="primary", key="btn_salvar_reqs"):
             try:
                 from sheets_nc import atualizar_req
-                for _, req_num, nova_sit, nova_entrada in changed_rows:
-                    atualizar_req(req_num, nova_sit, nova_entrada)
+                for _, req_num, nova_sit, nova_entrada, novo_ne in changed_rows:
+                    atualizar_req(req_num, nova_sit, nova_entrada, novo_ne)
                 carregar(forcar=True)
                 st.success("✅ Alterações salvas!")
                 st.rerun()

@@ -165,8 +165,8 @@ def ler_reqs() -> list[dict]:
     return resultado
 
 
-def atualizar_req(req_num: str, nova_situacao: str, nova_entrada: str) -> None:
-    """Atualiza SITUAÇÃO e ENTRADA NA BDA de uma REQ pelo número."""
+def atualizar_req(req_num: str, nova_situacao: str, nova_entrada: str, novo_ne: str = "") -> None:
+    """Atualiza SITUAÇÃO, ENTRADA NA BDA e NE de uma REQ pelo número."""
     client = _conectar()
     planilha = client.open_by_key(SHEET_ID_NC)
     ws = planilha.worksheet(ABA_REQS)
@@ -175,26 +175,28 @@ def atualizar_req(req_num: str, nova_situacao: str, nova_entrada: str) -> None:
         raise ValueError("Aba REQs vazia.")
     headers = todas[0]
 
-    col_req  = headers.index("REQ")            + 1 if "REQ"            in headers else None
-    col_sit  = headers.index("SITUAÇÃO")       + 1 if "SITUAÇÃO"       in headers else None
-    col_ent  = headers.index("ENTRADA NA BDA") + 1 if "ENTRADA NA BDA" in headers else None
+    def _col(name):
+        return headers.index(name) + 1 if name in headers else None
+
+    col_req = _col("REQ")
+    col_sit = _col("SITUAÇÃO")
+    col_ent = _col("ENTRADA NA BDA")
+    col_ne  = _col("NE")
 
     if col_req is None:
         raise ValueError("Coluna REQ não encontrada na aba.")
 
+    from gspread.utils import rowcol_to_a1
     for i, row in enumerate(todas[1:], start=2):
         val_req = row[col_req - 1] if len(row) >= col_req else ""
         if str(val_req).strip() == str(req_num).strip():
             batch = []
-            if col_sit:
-                from gspread.utils import rowcol_to_a1
-                batch.append({"range": rowcol_to_a1(i, col_sit),  "values": [[nova_situacao]]})
-            if col_ent:
-                from gspread.utils import rowcol_to_a1
-                batch.append({"range": rowcol_to_a1(i, col_ent),  "values": [[nova_entrada]]})
+            if col_sit: batch.append({"range": rowcol_to_a1(i, col_sit), "values": [[nova_situacao]]})
+            if col_ent: batch.append({"range": rowcol_to_a1(i, col_ent), "values": [[nova_entrada]]})
+            if col_ne:  batch.append({"range": rowcol_to_a1(i, col_ne),  "values": [[novo_ne]]})
             if batch:
                 ws.batch_update(batch, value_input_option="USER_ENTERED")
-            logger.info("REQ %s atualizada: situação=%s entrada=%s", req_num, nova_situacao, nova_entrada)
+            logger.info("REQ %s atualizada: sit=%s entrada=%s ne=%s", req_num, nova_situacao, nova_entrada, novo_ne)
             return
     raise ValueError(f"REQ '{req_num}' não encontrada na planilha.")
 
