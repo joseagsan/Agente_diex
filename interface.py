@@ -954,7 +954,7 @@ def page_reqs(reqs, ncs):
             "VALOR":          st.column_config.TextColumn("Valor",        width=120, disabled=True),
             "SITUAÇÃO":       st.column_config.SelectboxColumn(
                                   "Situação", width=110,
-                                  options=SITUACOES_REQ),
+                                  options=["Pendente", "Empenhada"]),
             "ENTRADA NA BDA": st.column_config.TextColumn("Entrada SALC", width=110),
             "NE":             st.column_config.TextColumn("NE",           width=90,  disabled=True),
             "OBS":            st.column_config.TextColumn("Obs",          width=120, disabled=True),
