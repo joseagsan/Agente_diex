@@ -85,7 +85,9 @@ def _sessao() -> requests.Session:
 
 
 def _csrf(s: requests.Session, url: str) -> str:
-    r = s.get(url, timeout=20)
+    r = s.get(url, timeout=(5, 15), allow_redirects=False)
+    if r.status_code in (301, 302, 303, 307, 308):
+        raise ValueError("Sessão expirada (redirecionado ao buscar CSRF) — atualize session_json.")
     tag = BeautifulSoup(r.text, "lxml").find("meta", {"name": "csrf-token"})
     return tag["content"] if tag else ""
 
@@ -186,27 +188,26 @@ def _listar_itens(s: requests.Session, compra_id: str) -> list[dict]:
     Retorna lista básica de itens: {numero, descricao, item_id}.
     Pagina automaticamente enquanto o servidor retornar linhas.
     """
-    import time
     url_itens = f"{BASE}/transparencia/compras/{compra_id}/itens"
+
+    # CSRF buscado UMA vez — válido por toda a sessão
+    csrf = _csrf(s, url_itens)
+    hdrs = _hdrs(csrf, url_itens)
+
     PAGE  = 200
     itens = []
     draw  = 1
     total = 0
 
     while True:
-        # Renova CSRF a cada página para evitar token expirado
-        csrf = _csrf(s, url_itens)
-        hdrs = _hdrs(csrf, url_itens)
-
         r = s.post(
             url_itens + "/search",
             data={"start": len(itens), "length": PAGE, "draw": draw},
             headers=hdrs,
             timeout=30,
-            allow_redirects=False,   # evita travar em redirect para SSO
+            allow_redirects=False,
         )
 
-        # Redirect = sessão expirou
         if r.status_code in (301, 302, 303, 307, 308):
             raise ValueError("Sessão expirada ao paginar itens — atualize session_json.")
 
@@ -232,18 +233,14 @@ def _listar_itens(s: requests.Session, compra_id: str) -> list[dict]:
             if descricao and item_id:
                 itens.append({"numero": numero, "descricao": descricao, "item_id": item_id})
 
-        novos = len(itens) - before
-        logger.info("Página %d: %d linhas brutas, %d novos itens (total: %d/%d)",
-                    draw, len(rows), novos, len(itens), total)
+        logger.info("Página %d: %d linhas, %d novos, total %d/%d",
+                    draw, len(rows), len(itens) - before, len(itens), total)
 
         draw += 1
-        # Para: sem linhas, última página, ou atingiu total
         if not rows or len(rows) < PAGE or (total > 0 and len(itens) >= total):
             break
 
-        time.sleep(0.3)  # pausa mínima entre páginas
-
-    logger.info("Itens coletados: %d (total declarado: %d)", len(itens), total)
+    logger.info("Itens coletados: %d / %d", len(itens), total)
     return itens
 
 
