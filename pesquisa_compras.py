@@ -184,27 +184,42 @@ def _buscar_id_compra(s: requests.Session, uasg: str, num_pregao: str) -> str:
 def _listar_itens(s: requests.Session, compra_id: str) -> list[dict]:
     """
     Retorna lista básica de itens: {numero, descricao, item_id}.
+    Pagina automaticamente enquanto o servidor retornar linhas.
     """
+    import time
     url_itens = f"{BASE}/transparencia/compras/{compra_id}/itens"
-    csrf = _csrf(s, url_itens)
-    hdrs = _hdrs(csrf, url_itens)
-
-    PAGE = 200
+    PAGE  = 200
     itens = []
-    draw = 1
+    draw  = 1
+    total = 0
 
     while True:
-        r = s.post(url_itens + "/search",
-                   data={"start": len(itens), "length": PAGE, "draw": draw},
-                   headers=hdrs, timeout=30)
+        # Renova CSRF a cada página para evitar token expirado
+        csrf = _csrf(s, url_itens)
+        hdrs = _hdrs(csrf, url_itens)
+
+        r = s.post(
+            url_itens + "/search",
+            data={"start": len(itens), "length": PAGE, "draw": draw},
+            headers=hdrs,
+            timeout=30,
+            allow_redirects=False,   # evita travar em redirect para SSO
+        )
+
+        # Redirect = sessão expirou
+        if r.status_code in (301, 302, 303, 307, 308):
+            raise ValueError("Sessão expirada ao paginar itens — atualize session_json.")
+
         r.raise_for_status()
         payload = r.json()
         rows = payload.get("data", [])
+
         try:
             total = int(payload.get("recordsFiltered") or payload.get("recordsTotal") or 0)
         except (ValueError, TypeError):
             total = 0
 
+        before = len(itens)
         for row in rows:
             numero    = _txt(row[0]) if row else ""
             descricao = _txt(row[2]) if len(row) > 2 else ""
@@ -217,12 +232,18 @@ def _listar_itens(s: requests.Session, compra_id: str) -> list[dict]:
             if descricao and item_id:
                 itens.append({"numero": numero, "descricao": descricao, "item_id": item_id})
 
+        novos = len(itens) - before
+        logger.info("Página %d: %d linhas brutas, %d novos itens (total: %d/%d)",
+                    draw, len(rows), novos, len(itens), total)
+
         draw += 1
-        # Para quando: veio página incompleta, ou atingiu o total declarado
+        # Para: sem linhas, última página, ou atingiu total
         if not rows or len(rows) < PAGE or (total > 0 and len(itens) >= total):
             break
 
-    logger.info("Total de itens coletados: %d (total declarado: %d)", len(itens), total)
+        time.sleep(0.3)  # pausa mínima entre páginas
+
+    logger.info("Itens coletados: %d (total declarado: %d)", len(itens), total)
     return itens
 
 
