@@ -1351,30 +1351,30 @@ def page_gerar_req(reqs, ncs):
                     st.rerun()
 
     with col_f:
-        st.caption("📝 Finalidade / Objeto")
-        frases_final = _frases("FINAL")
-        sel_final = st.selectbox("Frase padrão", frases_final, key="sel_final_frase",
-                                  label_visibility="collapsed")
-        if sel_final != "— escrever manualmente —":
-            st.session_state["_final_txt"] = sel_final
-        elif "_final_txt" not in st.session_state:
-            st.session_state["_final_txt"] = ""
+        st.caption("📝 Assunto")
+        frases_assunto = _frases("FINAL")
+        sel_assunto = st.selectbox("Frase padrão", frases_assunto, key="sel_assunto_frase",
+                                    label_visibility="collapsed")
+        if sel_assunto != "— escrever manualmente —":
+            st.session_state["_assunto_txt"] = sel_assunto
+        elif "_assunto_txt" not in st.session_state:
+            st.session_state["_assunto_txt"] = ""
 
-        with st.expander("➕ Cadastrar nova frase de Finalidade"):
-            nova_final = st.text_area("Texto", key="nova_final_txt", height=80)
-            if st.button("💾 Salvar", key="btn_salvar_final"):
-                if nova_final.strip():
+        with st.expander("➕ Cadastrar nova frase de Assunto"):
+            nova_assunto = st.text_area("Texto", key="nova_assunto_txt", height=80)
+            if st.button("💾 Salvar", key="btn_salvar_assunto"):
+                if nova_assunto.strip():
                     from sheets_nc import adicionar_frase
-                    adicionar_frase("FINAL", nova_final.strip())
+                    adicionar_frase("FINAL", nova_assunto.strip())
                     st.cache_data.clear()
                     st.success("Frase salva!")
                     st.rerun()
 
-        if sel_final != "— escrever manualmente —":
+        if sel_assunto != "— escrever manualmente —":
             with st.expander("🗑️ Excluir esta frase"):
-                if st.button("Confirmar exclusão", key="btn_del_final"):
+                if st.button("Confirmar exclusão", key="btn_del_assunto"):
                     from sheets_nc import excluir_frase
-                    excluir_frase("FINAL", sel_final)
+                    excluir_frase("FINAL", sel_assunto)
                     st.cache_data.clear()
                     st.rerun()
 
@@ -1397,12 +1397,10 @@ def page_gerar_req(reqs, ncs):
         ug   = c8.text_input("UG", value=nc_d.get("UG", UG_PADRAO))
         om   = c9.text_input("OM", value=nc_d.get("OM", OM_PADRAO))
 
-        assunto      = st.text_input("Assunto", value=_v("FINALIDADE", "FINALIDADE"))
+        assunto      = st.text_input("Assunto", value=st.session_state.get("_assunto_txt") or _v("FINALIDADE", "FINALIDADE"))
         intro        = st.text_area("Introdução",  value=st.session_state.get("_intro_txt", ""), height=80)
         justificativa = st.text_area("Justificativa", value=st.session_state.get("_just_txt", ""), height=80)
-        finalidade   = st.text_area("Finalidade / Objeto",
-                                    value=st.session_state.get("_final_txt") or _v("FINALIDADE", "FINALIDADE"),
-                                    height=60)
+        finalidade   = st.text_area("Finalidade / Objeto", value=_v("FINALIDADE", "FINALIDADE"), height=60)
 
         salvar_basico = st.form_submit_button("✅ Confirmar Dados Básicos", type="primary", use_container_width=True)
 
