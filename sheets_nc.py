@@ -156,8 +156,13 @@ def ler_reqs() -> list[dict]:
     planilha = client.open_by_key(SHEET_ID_NC)
     ws = planilha.worksheet(ABA_REQS)
     registros = _ws_para_dicts(ws)
-    logger.info("%d REQs lidas.", len(registros))
-    return [r for r in registros if r.get("EMPRESA") or r.get("REQ")]
+    logger.info("%d registros brutos na aba REQs.", len(registros))
+    if registros:
+        logger.info("Colunas encontradas: %s", list(registros[0].keys()))
+        logger.info("Primeira linha: %s", registros[0])
+    resultado = [r for r in registros if any(v.strip() for v in r.values() if v)]
+    logger.info("%d REQs não-vazias retornadas.", len(resultado))
+    return resultado
 
 
 def ler_fornecedores() -> list[dict]:
