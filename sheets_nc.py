@@ -219,30 +219,47 @@ def _set_nc_empenhado(nc_num: str, total_empenhado: float) -> None:
     if "EMPENHADO" in formula_cols:
         raise ValueError("Coluna EMPENHADO é fórmula — será atualizada automaticamente.")
 
-    col_situ = _col("SITU")
+    col_situ     = _col("SITU")
+    col_saldo    = _col("SALDO NC")
+    col_emtela   = _col("EM TELA")
+    col_emtelap  = _col("EM TELA %")
 
     from gspread.utils import rowcol_to_a1
     for i, row in enumerate(todas[1:], start=2):
         val_nc = row[col_nc - 1] if len(row) >= col_nc else ""
         if str(val_nc).strip() == str(nc_num).strip():
-            rec       = parse_moeda(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
-            pct_num   = (total_empenhado / rec * 100) if rec else 0.0
-            pct_str   = f"{pct_num:.2f}%".replace(".", ",")
+            rec        = parse_moeda(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
+            pct_num    = round((total_empenhado / rec * 100), 2) if rec else 0.0
+            saldo      = round(rec - total_empenhado, 2)
             totalmente = rec > 0 and round(pct_num) >= 100
 
-            batch = [{"range": rowcol_to_a1(i, col_emp), "values": [[format_moeda(total_empenhado)]]}]
+            # Escreve EMPENHADO como NÚMERO (não texto) para fórmulas funcionarem
+            batch = [{"range": rowcol_to_a1(i, col_emp), "values": [[total_empenhado]]}]
 
-            # Força EMP % mesmo que seja fórmula (fórmula não parseia texto R$)
+            # EMP % como número 0-100 (sobrescreve fórmula que falha com texto)
             if col_pemp:
-                batch.append({"range": rowcol_to_a1(i, col_pemp), "values": [[pct_str]]})
+                batch.append({"range": rowcol_to_a1(i, col_pemp),
+                               "values": [[f"{pct_num:.2f}%".replace(".", ",")]]})
 
-            # Muda SITU para OK quando 100% empenhado
-            if totalmente and col_situ and "SITU" not in formula_cols:
-                batch.append({"range": rowcol_to_a1(i, col_situ), "values": [["OK"]]})
+            if totalmente:
+                # SALDO NC = 0
+                if col_saldo and "SALDO NC" not in formula_cols:
+                    batch.append({"range": rowcol_to_a1(i, col_saldo),
+                                   "values": [[format_moeda(saldo)]]})
+                # EM TELA e EM TELA % = 0
+                if col_emtela and "EM TELA" not in formula_cols:
+                    batch.append({"range": rowcol_to_a1(i, col_emtela),
+                                   "values": [[format_moeda(0)]]})
+                if col_emtelap and "EM TELA %" not in formula_cols:
+                    batch.append({"range": rowcol_to_a1(i, col_emtelap),
+                                   "values": [["0,00%"]]})
+                # SITU → OK
+                if col_situ and "SITU" not in formula_cols:
+                    batch.append({"range": rowcol_to_a1(i, col_situ), "values": [["OK"]]})
 
             ws.batch_update(batch, value_input_option="USER_ENTERED")
-            logger.info("NC %s: EMP=%s pct=%s situ=%s",
-                        nc_num, total_empenhado, pct_str, "OK" if totalmente else "-")
+            logger.info("NC %s: EMPENHADO=%s EMP%%=%s SITU=%s",
+                        nc_num, total_empenhado, pct_num, "OK" if totalmente else "-")
             return
     raise ValueError(f"NC '{nc_num}' não encontrada.")
 
