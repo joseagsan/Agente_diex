@@ -752,17 +752,19 @@ def page_ncs(ncs):
     for nc in filtradas:
         d = _dias_prazo(nc)
         rows.append({
-            "":         _badge(nc),
-            "NC":       nc.get("NC", ""),
-            "ORGÃO":    nc.get("ORGÃO", ""),
-            "DATA NC":  nc.get("DATA NC", ""),
-            "PRAZO":    nc.get("PRAZO", ""),
-            "RESTAM":   d if d is not None else 9999,
-            "RECEBIDO": fmt(parse(nc.get("RECEBIDO", 0))),
-            "SALDO NC": fmt(parse(nc.get("SALDO NC",  0))),
-            "EMP %":    _parse_pct(nc.get("EMP %", "0")),
-            "EM TELA %":_parse_pct(nc.get("EM TELA %", "0")),
-            "SITUAÇÃO": nc.get("SITUAÇÃO", ""),
+            "":           _badge(nc),
+            "NC":         nc.get("NC", ""),
+            "ORGÃO":      nc.get("ORGÃO", ""),
+            "OP":         nc.get("OP", ""),
+            "FINALIDADE": nc.get("FINALIDADE", ""),
+            "DATA NC":    nc.get("DATA NC", ""),
+            "PRAZO":      nc.get("PRAZO", ""),
+            "RESTAM":     d if d is not None else 9999,
+            "RECEBIDO":   fmt(parse(nc.get("RECEBIDO", 0))),
+            "SALDO NC":   fmt(parse(nc.get("SALDO NC",  0))),
+            "EMP %":      _parse_pct(nc.get("EMP %", "0")),
+            "EM TELA %":  _parse_pct(nc.get("EM TELA %", "0")),
+            "SITUAÇÃO":   nc.get("SITUAÇÃO", ""),
         })
 
     df = pd.DataFrame(rows)
@@ -772,9 +774,11 @@ def page_ncs(ncs):
         hide_index=True,
         column_config={
             "":          st.column_config.TextColumn("",        width=35),
-            "NC":        st.column_config.TextColumn("NC",      width=130),
-            "ORGÃO":     st.column_config.TextColumn("Órgão",   width=110),
-            "DATA NC":   st.column_config.TextColumn("Data NC", width=90),
+            "NC":         st.column_config.TextColumn("NC",         width=130),
+            "ORGÃO":      st.column_config.TextColumn("Órgão",      width=110),
+            "OP":         st.column_config.TextColumn("Operação",    width=80),
+            "FINALIDADE": st.column_config.TextColumn("Finalidade",  width=200),
+            "DATA NC":    st.column_config.TextColumn("Data NC",     width=90),
             "PRAZO":     st.column_config.TextColumn("Prazo",   width=90),
             "RESTAM":    st.column_config.NumberColumn("Restam", width=75,
                              help="Dias restantes até o prazo"),
