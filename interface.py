@@ -1780,32 +1780,76 @@ def page_gerar_req(reqs, ncs):
             try:
                 from gerador import gerar_para_bytes
 
-                b2_modal  = st.session_state.get("b2_modal_inp", "PREGÃO")
-                b2_pregao = st.session_state.get("_b2_pregao") or st.session_state.get("b2_pregao_inp", "")
-                b2_ug     = st.session_state.get("_b2_ug") or st.session_state.get("b2_ug_inp", "")
-                modalidade = f"{b2_modal} - {b2_pregao} {b2_ug}".strip(" -")
+                _b2v      = st.session_state.get("_b2_ver", 0)
+                b2_modal  = st.session_state.get(f"b2_modal_{_b2v}", "PREGÃO")
+                b2_pregao = st.session_state.get("_b2_pregao") or st.session_state.get(f"b2_pregao_{_b2v}", "")
+                b2_ug     = st.session_state.get("_b2_ug") or st.session_state.get(f"b2_ug_{_b2v}", "")
+                b2_forn   = st.session_state.get("_b2_forn") or st.session_state.get(f"b2_forn_{_b2v}", "")
+                b2_cnpj   = st.session_state.get("_b2_cnpj") or st.session_state.get(f"b2_cnpj_{_b2v}", "")
+                b2_vig    = st.session_state.get("_b2_vig") or st.session_state.get(f"b2_vig_{_b2v}", "")
+                modalidade  = f"{b2_modal} - {b2_pregao} {b2_ug}".strip(" -")
                 total_geral = sum(i["_total"] for i in itens)
                 campos_finais = {
                     **campos,
-                    "FORNECEDOR_NOME": st.session_state.get("_b2_forn") or st.session_state.get("b2_forn_inp", ""),
-                    "FORNECEDOR_CNPJ": _formatar_cnpj(st.session_state.get("_b2_cnpj") or st.session_state.get("b2_cnpj_inp", "")),
+                    "FORNECEDOR_NOME": b2_forn,
+                    "FORNECEDOR_CNPJ": _formatar_cnpj(b2_cnpj),
                     "MODALIDADE":      modalidade,
-                    "VIGENCIA_DA_ATA": st.session_state.get("_b2_vig") or st.session_state.get("b2_vig_inp", ""),
+                    "VIGENCIA_DA_ATA": b2_vig,
                     "TOTAL":           fmt(total_geral),
                 }
                 itens_limpos = [{k: v for k, v in i.items() if not k.startswith("_")} for i in itens]
                 doc_bytes    = gerar_para_bytes(TEMPLATE_PATH, campos_finais, itens_limpos)
                 nome_arq     = f"REQ_{campos.get('requisition_id', 'doc')}.docx"
-                st.download_button(
-                    "⬇️ Baixar Documento",
-                    data=doc_bytes,
-                    file_name=nome_arq,
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
-                )
-                st.success(f"✅ {nome_arq} pronto para download!")
+
+                st.session_state["_doc_bytes"]   = doc_bytes
+                st.session_state["_doc_nome"]    = nome_arq
+                st.session_state["_doc_campos"]  = campos_finais
+                st.session_state["_doc_total"]   = total_geral
+                st.session_state["_doc_req_cadastrada"] = False
             except Exception as e:
                 st.error(f"Erro ao gerar documento: {e}")
+
+    # ── Download + confirmação de cadastro ────────────────────────────
+    if st.session_state.get("_doc_bytes"):
+        st.download_button(
+            "⬇️ Baixar Documento",
+            data=st.session_state["_doc_bytes"],
+            file_name=st.session_state.get("_doc_nome", "REQ.docx"),
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
+
+        if st.session_state.get("_doc_req_cadastrada"):
+            st.success("✅ Requisição cadastrada em Requisições com situação **Pendente**.")
+        else:
+            st.info("📋 Deseja cadastrar esta requisição na planilha?")
+            cad1, cad2 = st.columns(2)
+            if cad1.button("✅ Sim, cadastrar", type="primary", use_container_width=True, key="btn_cad_sim"):
+                try:
+                    from sheets_nc import adicionar_req
+                    cf   = st.session_state["_doc_campos"]
+                    desc = "; ".join(i.get("DESCRICAO_ITEM","")[:40] for i in st.session_state.req_itens[:3])
+                    adicionar_req({
+                        "REQ":      cf.get("requisition_id", ""),
+                        "NE":       cf.get("NE", ""),
+                        "NC":       st.session_state.get("gerar_nc_sel", ""),
+                        "PI":       cf.get("PI", ""),
+                        "FINALIDADE": cf.get("ASSUNTO", ""),
+                        "TIPO":     cf.get("TIPO", "Ordinário"),
+                        "EMPRESA":  cf.get("FORNECEDOR_NOME", ""),
+                        "DESCRIÇÃO": desc,
+                        "VALOR":    st.session_state.get("_doc_total", 0.0),
+                        "SITUAÇÃO": "Pendente",
+                        "ARQUIVO REQ": st.session_state.get("_doc_nome", ""),
+                    })
+                    carregar(forcar=True)
+                    st.session_state["_doc_req_cadastrada"] = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao cadastrar: {e}")
+            if cad2.button("✖ Não", use_container_width=True, key="btn_cad_nao"):
+                st.session_state["_doc_req_cadastrada"] = True
+                st.rerun()
 
 
 def _formatar_cnpj(cnpj: str) -> str:
