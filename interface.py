@@ -1533,11 +1533,11 @@ def page_gerar_req(reqs, ncs):
                                 st.error(f"❌ Req vinculada a **{forn_atual}**.")
                             else:
                                 v = float(dados.get("valor_unit_num") or 0)
-                                _si_grp = st.session_state.get("_fi_si", "")
+                                _si_grp = _num_si(st.session_state.get("_fi_si", ""))
                                 st.session_state.req_itens.append({
                                     "ORD":            str(len(st.session_state.req_itens) + 1),
                                     "ITEM":           str(num),
-                                    "SI":             "" if _si_grp == "— sem SI —" else _si_grp,
+                                    "SI":             _si_grp,
                                     "DESCRICAO_ITEM": dados.get("descricao_det") or dados.get("descricao",""),
                                     "UND":            str(dados.get("und") or "UN"),
                                     "QTD":            "1,000",
@@ -1600,11 +1600,11 @@ def page_gerar_req(reqs, ncs):
                     else:
                         v    = float(det.get("valor_unit_num") or 0)
                         desc = det.get("descricao_det") or str(res.get("descricao",""))
-                        _si_usar = st.session_state.get("_fi_si", "")
+                        _si_usar = _num_si(st.session_state.get("_fi_si", ""))
                         st.session_state.req_itens.append({
                             "ORD":            str(len(st.session_state.req_itens) + 1),
                             "ITEM":           str(num),
-                            "SI":             "" if _si_usar == "— sem SI —" else _si_usar,
+                            "SI":             _si_usar,
                             "DESCRICAO_ITEM": desc,
                             "UND":            str(det.get("und") or "UN"),
                             "QTD":            "1,000",
@@ -1686,7 +1686,7 @@ def page_gerar_req(reqs, ncs):
 
     if add:
         if item and desc and vunit > 0:
-            si_val  = "" if si_sel == "— sem SI —" else si_sel
+            si_val  = _num_si(si_sel)
             total   = round(qtd * vunit, 2)
             ord_num = len(st.session_state.req_itens) + 1
             st.session_state.req_itens.append({
@@ -1853,6 +1853,15 @@ def page_gerar_req(reqs, ncs):
             if cad2.button("✖ Não", use_container_width=True, key="btn_cad_nao"):
                 st.session_state["_doc_req_cadastrada"] = True
                 st.rerun()
+
+
+def _num_si(si_str: str) -> str:
+    """Extrai só o número de 'SI 16 – Material de expediente' → '16'."""
+    import re
+    if not si_str or si_str == "— sem SI —":
+        return ""
+    m = re.search(r"SI\s+(\d+)", si_str)
+    return m.group(1) if m else si_str
 
 
 def _formatar_cnpj(cnpj: str) -> str:
