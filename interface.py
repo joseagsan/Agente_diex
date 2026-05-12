@@ -1284,8 +1284,11 @@ def page_gerar_req(reqs, ncs):
                 cb.markdown(res.get("descricao", "")[:80])
                 label = "✓ Adicionado" if ja_adicionado else "➕ Usar"
                 if not ja_adicionado and cc.button(label, key=f"usar_item_{idx}"):
-                    with st.spinner("Carregando..."):
+                    with st.spinner("Carregando detalhes..."):
                         det = buscar_detalhe_item(str(res.get("compra_id","")), str(res.get("item_id","")))
+                    if det.get("_erro"):
+                        st.error(f"❌ {det['_erro']}")
+                        st.stop()
                     forn_item = str(det.get("fornecedor",""))
                     if forn_atual and forn_item and forn_item != forn_atual:
                         st.error(f"❌ Item de **{forn_item}** — req vinculada a **{forn_atual}**. Limpe os itens para trocar.")

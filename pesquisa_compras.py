@@ -225,7 +225,10 @@ def _detalhe_item(s: requests.Session, compra_id: str, item_id: str) -> dict:
     Busca fornecedor, CNPJ, valor unitário e vigência ARP na página de detalhe do item.
     """
     url = f"{BASE}/transparencia/compras/{compra_id}/itens/{item_id}/show"
-    r = s.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+    r = s.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=(5, 15))
+    ct = r.headers.get("Content-Type", "")
+    if "text/html" in ct and ("login" in r.url or "sso" in r.url):
+        raise ValueError("Sessão expirada — faça login novamente e atualize session_json.")
     soup = BeautifulSoup(r.text, "lxml")
     texto = soup.get_text(separator="\n", strip=True)
 
@@ -343,9 +346,14 @@ def buscar_detalhe_item(compra_id: str, item_id: str) -> dict:
     Busca detalhe de UM item específico (preço, fornecedor, CNPJ, vigência).
     Chamado apenas quando o usuário clica 'Usar'. v2
     """
-    cookies = _carregar_cookies()
-    if not cookies:
-        return {}
-    s = _sessao()
-    return _detalhe_item(s, compra_id, item_id)
+    try:
+        cookies = _carregar_cookies()
+        if not cookies:
+            logger.error("Sem cookies — session_json não configurado.")
+            return {"_erro": "Sessão não encontrada. Configure session_json."}
+        s = _sessao()
+        return _detalhe_item(s, compra_id, item_id)
+    except Exception as e:
+        logger.error("Erro ao buscar detalhe %s/%s: %s", compra_id, item_id, e)
+        return {"_erro": str(e)}
 
