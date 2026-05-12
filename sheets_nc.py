@@ -252,8 +252,10 @@ def adicionar_req(dados: dict) -> None:
 
     row_values = [str(linha.get(col, "")) for col in COLUNAS_REQ]
     logger.info("REQ row_values: %s", row_values)
-    # Usa update em linha específica para evitar erro 500 do append_row
     proxima_linha = len(ws.get_all_values()) + 1
+    # Expande o grid se necessário antes de escrever
+    if proxima_linha > ws.row_count:
+        ws.add_rows(max(50, proxima_linha - ws.row_count))
     ws.update(
         range_name=f"A{proxima_linha}",
         values=[row_values],
