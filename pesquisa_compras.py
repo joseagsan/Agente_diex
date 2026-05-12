@@ -189,32 +189,36 @@ def _listar_itens(s: requests.Session, compra_id: str) -> list[dict]:
     csrf = _csrf(s, url_itens)
     hdrs = _hdrs(csrf, url_itens)
 
-    r = s.post(url_itens + "/search",
-               data={"start": 0, "length": 500, "draw": 1},
-               headers=hdrs, timeout=30)
-    r.raise_for_status()
-    rows = r.json().get("data", [])
-
+    PAGE = 200
     itens = []
-    for row in rows:
-        numero = _txt(row[0]) if row else ""
-        descricao = _txt(row[2]) if len(row) > 2 else ""
+    draw = 1
 
-        # Extrai item_id do link na coluna de ações
-        item_id = ""
-        for c in row:
-            ids = re.findall(r"/itens/(\d+)/show", str(c))
-            if ids:
-                item_id = ids[0]
-                break
+    while True:
+        r = s.post(url_itens + "/search",
+                   data={"start": len(itens), "length": PAGE, "draw": draw},
+                   headers=hdrs, timeout=30)
+        r.raise_for_status()
+        payload = r.json()
+        rows = payload.get("data", [])
+        total = int(payload.get("recordsFiltered", 0) or payload.get("recordsTotal", 0))
 
-        if descricao and item_id:
-            itens.append({
-                "numero":    numero,
-                "descricao": descricao,
-                "item_id":   item_id,
-            })
+        for row in rows:
+            numero    = _txt(row[0]) if row else ""
+            descricao = _txt(row[2]) if len(row) > 2 else ""
+            item_id   = ""
+            for c in row:
+                ids = re.findall(r"/itens/(\d+)/show", str(c))
+                if ids:
+                    item_id = ids[0]
+                    break
+            if descricao and item_id:
+                itens.append({"numero": numero, "descricao": descricao, "item_id": item_id})
 
+        draw += 1
+        if not rows or len(itens) >= total:
+            break
+
+    logger.info("Total de itens coletados: %d / %d", len(itens), total)
     return itens
 
 
