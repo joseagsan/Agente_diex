@@ -219,17 +219,30 @@ def _set_nc_empenhado(nc_num: str, total_empenhado: float) -> None:
     if "EMPENHADO" in formula_cols:
         raise ValueError("Coluna EMPENHADO é fórmula — será atualizada automaticamente.")
 
+    col_situ = _col("SITU")
+
     from gspread.utils import rowcol_to_a1
     for i, row in enumerate(todas[1:], start=2):
         val_nc = row[col_nc - 1] if len(row) >= col_nc else ""
         if str(val_nc).strip() == str(nc_num).strip():
-            rec = parse_moeda(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
-            pct = f"{(total_empenhado / rec * 100):.2f}%".replace(".", ",") if rec else "0,00%"
+            rec       = parse_moeda(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
+            pct_num   = (total_empenhado / rec * 100) if rec else 0.0
+            pct_str   = f"{pct_num:.2f}%".replace(".", ",")
+            totalmente = rec > 0 and round(pct_num) >= 100
+
             batch = [{"range": rowcol_to_a1(i, col_emp), "values": [[format_moeda(total_empenhado)]]}]
-            if col_pemp and "EMP %" not in formula_cols:
-                batch.append({"range": rowcol_to_a1(i, col_pemp), "values": [[pct]]})
+
+            # Força EMP % mesmo que seja fórmula (fórmula não parseia texto R$)
+            if col_pemp:
+                batch.append({"range": rowcol_to_a1(i, col_pemp), "values": [[pct_str]]})
+
+            # Muda SITU para OK quando 100% empenhado
+            if totalmente and col_situ and "SITU" not in formula_cols:
+                batch.append({"range": rowcol_to_a1(i, col_situ), "values": [["OK"]]})
+
             ws.batch_update(batch, value_input_option="USER_ENTERED")
-            logger.info("NC %s EMPENHADO definido como %s", nc_num, total_empenhado)
+            logger.info("NC %s: EMP=%s pct=%s situ=%s",
+                        nc_num, total_empenhado, pct_str, "OK" if totalmente else "-")
             return
     raise ValueError(f"NC '{nc_num}' não encontrada.")
 
