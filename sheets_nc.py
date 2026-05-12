@@ -252,16 +252,29 @@ def adicionar_req(dados: dict) -> None:
 
     row_values = [str(linha.get(col, "")) for col in COLUNAS_REQ]
     logger.info("REQ row_values: %s", row_values)
+
+    # Tenta append_row; se der 500 (erro de fórmula/trigger na planilha),
+    # faz fallback: expande o grid e usa update em célula específica.
+    import time
+    for tentativa in range(3):
+        try:
+            ws.append_row(row_values, value_input_option="USER_ENTERED", table_range="A1")
+            logger.info("REQ adicionada (append_row) para empresa: %s", dados.get("EMPRESA", ""))
+            return
+        except Exception as e:
+            logger.warning("append_row tentativa %d falhou: %s", tentativa + 1, e)
+            time.sleep(1.5)
+
+    # Fallback final: expande grid + update
     proxima_linha = len(ws.get_all_values()) + 1
-    # Expande o grid se necessário antes de escrever
     if proxima_linha > ws.row_count:
-        ws.add_rows(max(50, proxima_linha - ws.row_count))
+        ws.add_rows(max(100, proxima_linha - ws.row_count + 10))
     ws.update(
         range_name=f"A{proxima_linha}",
         values=[row_values],
         value_input_option="USER_ENTERED",
     )
-    logger.info("REQ adicionada na linha %d para empresa: %s", proxima_linha, dados.get("EMPRESA", ""))
+    logger.info("REQ adicionada (update fallback) na linha %d", proxima_linha)
 
 
 # ── Frases padrão ─────────────────────────────────────────────────────────────
