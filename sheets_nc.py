@@ -251,30 +251,42 @@ def adicionar_req(dados: dict) -> None:
     }
 
     row_values = [str(linha.get(col, "")) for col in COLUNAS_REQ]
-    logger.info("REQ row_values: %s", row_values)
 
-    # Tenta append_row; se der 500 (erro de fórmula/trigger na planilha),
-    # faz fallback: expande o grid e usa update em célula específica.
-    import time
-    for tentativa in range(3):
+    # Detecta colunas com fórmula para não sobrescrevê-las (causaria erro 500)
+    headers = ws.row_values(1)
+    formula_cols: set[str] = set()
+    todas = ws.get_all_values()
+    if len(todas) > 1:
         try:
-            ws.append_row(row_values, value_input_option="USER_ENTERED", table_range="A1")
-            logger.info("REQ adicionada (append_row) para empresa: %s", dados.get("EMPRESA", ""))
-            return
+            formula_row = ws.row_values(2, value_render_option="FORMULA")
+            formula_cols = {
+                headers[i]
+                for i, v in enumerate(formula_row)
+                if i < len(headers) and str(v).startswith("=")
+            }
+            logger.info("Colunas com fórmula (ignoradas): %s", formula_cols)
         except Exception as e:
-            logger.warning("append_row tentativa %d falhou: %s", tentativa + 1, e)
-            time.sleep(1.5)
+            logger.warning("Não detectou fórmulas: %s", e)
 
-    # Fallback final: expande grid + update
-    proxima_linha = len(ws.get_all_values()) + 1
+    # Próxima linha vazia
+    proxima_linha = len(todas) + 1
     if proxima_linha > ws.row_count:
         ws.add_rows(max(100, proxima_linha - ws.row_count + 10))
-    ws.update(
-        range_name=f"A{proxima_linha}",
-        values=[row_values],
-        value_input_option="USER_ENTERED",
-    )
-    logger.info("REQ adicionada (update fallback) na linha %d", proxima_linha)
+
+    # Escreve somente nas colunas sem fórmula
+    from gspread.utils import rowcol_to_a1
+    batch = []
+    for i, col_name in enumerate(COLUNAS_REQ):
+        if col_name in formula_cols:
+            continue
+        col_idx = (headers.index(col_name) + 1) if col_name in headers else (i + 1)
+        cell = rowcol_to_a1(proxima_linha, col_idx)
+        batch.append({"range": cell, "values": [[row_values[i]]]})
+
+    if batch:
+        ws.batch_update(batch, value_input_option="USER_ENTERED")
+    logger.info("REQ adicionada na linha %d (pulou %d colunas com fórmula)",
+                proxima_linha, len(formula_cols))
 
 
 # ── Frases padrão ─────────────────────────────────────────────────────────────
