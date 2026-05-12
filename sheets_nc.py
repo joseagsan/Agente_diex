@@ -252,8 +252,14 @@ def adicionar_req(dados: dict) -> None:
 
     row_values = [str(linha.get(col, "")) for col in COLUNAS_REQ]
     logger.info("REQ row_values: %s", row_values)
-    ws.append_row(row_values, value_input_option="RAW")
-    logger.info("REQ adicionada para empresa: %s", dados.get("EMPRESA", ""))
+    # Usa update em linha específica para evitar erro 500 do append_row
+    proxima_linha = len(ws.get_all_values()) + 1
+    ws.update(
+        range_name=f"A{proxima_linha}",
+        values=[row_values],
+        value_input_option="USER_ENTERED",
+    )
+    logger.info("REQ adicionada na linha %d para empresa: %s", proxima_linha, dados.get("EMPRESA", ""))
 
 
 # ── Frases padrão ─────────────────────────────────────────────────────────────

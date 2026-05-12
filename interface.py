@@ -912,44 +912,66 @@ def page_reqs(reqs, ncs):
 def _form_req(ncs):
     st.divider()
     st.subheader("➕ Nova Requisição")
+
+    # NC fora do form → PI preenche reativamente
     nums_nc = [""] + [nc.get("NC", "") for nc in ncs if nc.get("NC")]
+    nc_sel  = st.selectbox("NC Vinculada *", nums_nc, key="_frq_nc_sel")
+    nc_d    = next((nc for nc in ncs if nc.get("NC") == nc_sel), {}) if nc_sel else {}
+
+    if nc_d:
+        st.info(f"📋 **{nc_sel}** · {nc_d.get('ORGÃO','')} · PI: {nc_d.get('PI','')} · Saldo: {nc_d.get('SALDO NC','')}")
+
     with st.form("f_req", clear_on_submit=True):
         c1, c2 = st.columns(2)
-        req_num  = c1.text_input("Número REQ")
-        nc_sel   = c1.selectbox("NC Vinculada *", nums_nc)
-        data_req = c1.date_input("Data REQ",  value=date.today())
-        empresa  = c1.text_input("Empresa *")
-        pi       = c2.text_input("PI")
-        tipo     = c2.selectbox("Tipo",      ["Ordinário", "Especial"])
+        req_num      = c1.text_input("Número REQ")
+        data_req     = c1.date_input("Data REQ", value=date.today())
+        empresa      = c1.text_input("Empresa *")
+        entrada_salc = c1.date_input("Entrada na SALC", value=None)
+
+        pi       = c2.text_input("PI", value=nc_d.get("PI", ""))
+        tipo     = c2.selectbox("Tipo", ["Ordinário", "Especial"])
         ne       = c2.text_input("NE")
-        situacao = c2.selectbox("Situação",  SITUACOES_REQ)
-        finalidade = st.text_area("Finalidade")
+        situacao = c2.selectbox("Situação", SITUACOES_REQ)
+
+        finalidade = st.text_area("Finalidade", value=nc_d.get("FINALIDADE", ""))
         descricao  = st.text_area("Descrição *")
         valor = st.number_input("Valor (R$) *", min_value=0.0, step=0.01, format="%.2f")
         obs   = st.text_input("Observações")
+
         s1, s2 = st.columns(2)
         salvar   = s1.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
         cancelar = s2.form_submit_button("✖ Cancelar", use_container_width=True)
+
         if cancelar:
-            st.session_state["form_req"] = False; st.rerun()
+            st.session_state["form_req"] = False
+            st.rerun()
+
         if salvar:
             if not empresa or not descricao or valor <= 0:
                 st.error("Preencha Empresa, Descrição e Valor.")
             else:
                 try:
-                    pi_f = pi; fin_f = finalidade
-                    if nc_sel and not pi:
-                        nc_d = next((nc for nc in ncs if nc.get("NC") == nc_sel), {})
-                        pi_f = nc_d.get("PI", ""); fin_f = fin_f or nc_d.get("OP", "")
+                    entrada_str = entrada_salc.strftime("%d/%m/%Y") if entrada_salc else ""
                     from sheets_nc import adicionar_req
-                    adicionar_req({"REQ": req_num, "NC": nc_sel,
-                                   "DATA REQ": data_req.strftime("%d/%m/%Y"),
-                                   "PI": pi_f, "FINALIDADE": fin_f, "TIPO": tipo,
-                                   "EMPRESA": empresa, "DESCRIÇÃO": descricao,
-                                   "VALOR": valor, "SITUAÇÃO": situacao, "NE": ne, "OBS": obs})
+                    adicionar_req({
+                        "REQ":            req_num,
+                        "NC":             nc_sel,
+                        "DATA REQ":       data_req.strftime("%d/%m/%Y"),
+                        "PI":             pi or nc_d.get("PI", ""),
+                        "FINALIDADE":     finalidade,
+                        "TIPO":           tipo,
+                        "EMPRESA":        empresa,
+                        "DESCRIÇÃO":      descricao,
+                        "VALOR":          valor,
+                        "SITUAÇÃO":       situacao,
+                        "NE":             ne,
+                        "ENTRADA NA BDA": entrada_str,
+                        "OBS":            obs,
+                    })
                     st.success("✅ REQ adicionada!")
                     st.session_state["form_req"] = False
-                    carregar(forcar=True); st.rerun()
+                    carregar(forcar=True)
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
