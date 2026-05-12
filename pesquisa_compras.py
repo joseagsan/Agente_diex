@@ -200,7 +200,10 @@ def _listar_itens(s: requests.Session, compra_id: str) -> list[dict]:
         r.raise_for_status()
         payload = r.json()
         rows = payload.get("data", [])
-        total = int(payload.get("recordsFiltered", 0) or payload.get("recordsTotal", 0))
+        try:
+            total = int(payload.get("recordsFiltered") or payload.get("recordsTotal") or 0)
+        except (ValueError, TypeError):
+            total = 0
 
         for row in rows:
             numero    = _txt(row[0]) if row else ""
@@ -215,10 +218,11 @@ def _listar_itens(s: requests.Session, compra_id: str) -> list[dict]:
                 itens.append({"numero": numero, "descricao": descricao, "item_id": item_id})
 
         draw += 1
-        if not rows or len(itens) >= total:
+        # Para quando: veio página incompleta, ou atingiu o total declarado
+        if not rows or len(rows) < PAGE or (total > 0 and len(itens) >= total):
             break
 
-    logger.info("Total de itens coletados: %d / %d", len(itens), total)
+    logger.info("Total de itens coletados: %d (total declarado: %d)", len(itens), total)
     return itens
 
 
@@ -230,11 +234,13 @@ def _detalhe_item(s: requests.Session, compra_id: str, item_id: str) -> dict:
     """
     url = f"{BASE}/transparencia/compras/{compra_id}/itens/{item_id}/show"
     r = s.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=(5, 15))
+    logger.info("DETALHE %s → HTTP %s | URL final: %s", item_id, r.status_code, r.url)
     ct = r.headers.get("Content-Type", "")
-    if "text/html" in ct and ("login" in r.url or "sso" in r.url):
+    if "login" in r.url or "sso" in r.url:
         raise ValueError("Sessão expirada — faça login novamente e atualize session_json.")
     soup = BeautifulSoup(r.text, "lxml")
     texto = soup.get_text(separator="\n", strip=True)
+    logger.info("DETALHE texto (300 chars): %s", texto[:300].replace("\n", " | "))
 
     result = {
         "und":             "UN",

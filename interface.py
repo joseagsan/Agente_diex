@@ -1289,6 +1289,8 @@ def page_gerar_req(reqs, ncs):
                     if det.get("_erro"):
                         st.error(f"❌ {det['_erro']}")
                         st.stop()
+                    if not det.get("fornecedor") and not det.get("valor_unit_num"):
+                        st.warning("⚠️ Detalhe retornou vazio — verifique os logs do Railway (DETALHE texto).")
                     forn_item = str(det.get("fornecedor",""))
                     if forn_atual and forn_item and forn_item != forn_atual:
                         st.error(f"❌ Item de **{forn_item}** — req vinculada a **{forn_atual}**. Limpe os itens para trocar.")
