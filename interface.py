@@ -1760,6 +1760,9 @@ def page_gerar_req(reqs, ncs):
         with k2:
             if st.button("🗑️ Limpar todos os itens"):
                 st.session_state.req_itens = []
+                for k in ("_b2_forn", "_b2_cnpj", "_b2_pregao", "_b2_ug", "_b2_vig"):
+                    st.session_state.pop(k, None)
+                st.session_state["_b2_ver"] = st.session_state.get("_b2_ver", 0) + 1
                 st.rerun()
     else:
         st.info("Nenhum item adicionado ainda.")
