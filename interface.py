@@ -1273,10 +1273,30 @@ def page_gerar_req(reqs, ncs):
             # Se forn_map está carregado, não precisa mais do expander flat abaixo
             forn_map = st.session_state.get("pesq_forn_map", {})
 
-        # Lista flat (antes de carregar fornecedores)
+        # Lista flat paginada (antes de carregar fornecedores)
         if not st.session_state.get("pesq_forn_map"):
-            with st.expander(f"📋 Ver todos os {len(resultados_pesq)} itens (sem agrupamento)", expanded=True):
-              for idx, res in enumerate(resultados_pesq):
+            PAGE_UI = 50
+            total_itens = len(resultados_pesq)
+            total_pags = (total_itens + PAGE_UI - 1) // PAGE_UI
+            pag_key = "pesq_pag"
+            if pag_key not in st.session_state:
+                st.session_state[pag_key] = 0
+            pag = st.session_state[pag_key]
+
+            inicio = pag * PAGE_UI
+            fim    = min(inicio + PAGE_UI, total_itens)
+
+            st.caption(f"📋 Itens {inicio+1}–{fim} de {total_itens}")
+            nav1, nav2, nav3 = st.columns([1, 6, 1])
+            if nav1.button("◀", key="pesq_prev", disabled=pag == 0):
+                st.session_state[pag_key] = pag - 1
+                st.rerun()
+            nav2.markdown(f"<center>Página {pag+1} / {total_pags}</center>", unsafe_allow_html=True)
+            if nav3.button("▶", key="pesq_next", disabled=pag >= total_pags - 1):
+                st.session_state[pag_key] = pag + 1
+                st.rerun()
+
+            for idx, res in enumerate(resultados_pesq[inicio:fim], start=inicio):
                 num = res.get("numero_item", "")
                 ja_adicionado = num in itens_ja_adicionados
                 ca, cb, cc = st.columns([1, 8, 2])
