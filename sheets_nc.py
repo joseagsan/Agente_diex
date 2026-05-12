@@ -251,7 +251,8 @@ def adicionar_req(dados: dict) -> None:
     }
 
     row_values = [str(linha.get(col, "")) for col in COLUNAS_REQ]
-    ws.append_row(row_values, value_input_option="USER_ENTERED")
+    logger.info("REQ row_values: %s", row_values)
+    ws.append_row(row_values, value_input_option="RAW")
     logger.info("REQ adicionada para empresa: %s", dados.get("EMPRESA", ""))
 
 
