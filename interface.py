@@ -900,13 +900,64 @@ def page_reqs(reqs, ncs):
     if st.session_state.get("form_req"):
         _form_req(ncs)
 
-    if filtradas:
-        cols = [c for c in ["REQ", "DATA REQ", "NC", "PI", "EMPRESA", "DESCRIÇÃO",
-                             "VALOR", "SITUAÇÃO", "NE", "FINALIDADE", "OBS"]
-                if c in pd.DataFrame(filtradas).columns]
-        st.dataframe(pd.DataFrame(filtradas)[cols], use_container_width=True, hide_index=True)
-    else:
+    if not filtradas:
         st.info("Nenhuma REQ encontrada.")
+        return
+
+    # KPIs rápidos
+    k1, k2, k3, k4 = st.columns(4)
+    total_val  = sum(parse(r.get("VALOR", 0)) for r in filtradas)
+    pendentes  = sum(1 for r in filtradas if r.get("SITUAÇÃO") == "Pendente")
+    empenhadas = sum(1 for r in filtradas if r.get("SITUAÇÃO") == "Empenhada")
+    pagas      = sum(1 for r in filtradas if r.get("SITUAÇÃO") == "Paga")
+    k1.metric("💰 Total", fmt(total_val))
+    k2.metric("⏳ Pendentes",  pendentes)
+    k3.metric("📌 Empenhadas", empenhadas)
+    k4.metric("✅ Pagas",      pagas)
+
+    def _badge_req(sit):
+        return {"Pendente": "🟡", "Enviada": "🔵", "Aprovada": "🟢",
+                "Empenhada": "🟠", "Liquidada": "🟣", "Paga": "⚪"}.get(sit, "⚪")
+
+    todas_cols = {k for r in filtradas for k in r.keys()}
+    rows = []
+    for r in filtradas:
+        valor_num = parse(r.get("VALOR", 0))
+        rows.append({
+            "":              _badge_req(r.get("SITUAÇÃO", "")),
+            "REQ":           r.get("REQ", ""),
+            "DATA REQ":      r.get("DATA REQ", ""),
+            "NC":            r.get("NC", ""),
+            "PI":            r.get("PI", ""),
+            "EMPRESA":       r.get("EMPRESA", ""),
+            "DESCRIÇÃO":     r.get("DESCRIÇÃO", "")[:60],
+            "VALOR":         fmt(valor_num) if valor_num else r.get("VALOR", ""),
+            "SITUAÇÃO":      r.get("SITUAÇÃO", ""),
+            "ENTRADA NA BDA": r.get("ENTRADA NA BDA", ""),
+            "NE":            r.get("NE", ""),
+            "OBS":           r.get("OBS", ""),
+        })
+
+    df_r = pd.DataFrame(rows)
+    st.dataframe(
+        df_r,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "":               st.column_config.TextColumn("",             width=35),
+            "REQ":            st.column_config.TextColumn("REQ",          width=60),
+            "DATA REQ":       st.column_config.TextColumn("Data",         width=90),
+            "NC":             st.column_config.TextColumn("NC",           width=120),
+            "PI":             st.column_config.TextColumn("PI",           width=70),
+            "EMPRESA":        st.column_config.TextColumn("Empresa",      width=160),
+            "DESCRIÇÃO":      st.column_config.TextColumn("Descrição",    width=200),
+            "VALOR":          st.column_config.TextColumn("Valor",        width=120),
+            "SITUAÇÃO":       st.column_config.TextColumn("Situação",     width=100),
+            "ENTRADA NA BDA": st.column_config.TextColumn("Entrada SALC", width=110),
+            "NE":             st.column_config.TextColumn("NE",           width=90),
+            "OBS":            st.column_config.TextColumn("Obs",          width=120),
+        },
+    )
 
 
 def _form_req(ncs):
