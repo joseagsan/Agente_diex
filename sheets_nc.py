@@ -165,6 +165,75 @@ def ler_reqs() -> list[dict]:
     return resultado
 
 
+def recalcular_empenhados(reqs: list[dict]) -> dict[str, str]:
+    """
+    Recalcula EMPENHADO de TODAS as NCs somando REQs com situação Empenhada.
+    Retorna dict {nc_num: mensagem} com o resultado de cada NC.
+    """
+    from collections import defaultdict
+    totais: dict[str, float] = defaultdict(float)
+    for r in reqs:
+        if r.get("SITUAÇÃO") == "Empenhada" and r.get("NC"):
+            totais[r["NC"]] += parse(r.get("VALOR", 0))
+
+    resultados = {}
+    for nc_num, total in totais.items():
+        try:
+            _set_nc_empenhado(nc_num, total)
+            resultados[nc_num] = f"✅ {format_moeda(total)}"
+        except Exception as e:
+            resultados[nc_num] = f"⚠️ {e}"
+    return resultados
+
+
+def _set_nc_empenhado(nc_num: str, total_empenhado: float) -> None:
+    """Define (sobrescreve) o EMPENHADO de uma NC com o valor informado."""
+    client = _conectar()
+    planilha = client.open_by_key(SHEET_ID_NC)
+    ws = planilha.worksheet(ABA_NCS)
+    todas = ws.get_all_values()
+    if not todas:
+        return
+    headers = todas[0]
+
+    def _col(name):
+        return headers.index(name) + 1 if name in headers else None
+
+    col_nc   = _col("NC")
+    col_emp  = _col("EMPENHADO")
+    col_pemp = _col("EMP %")
+    col_rec  = _col("RECEBIDO")
+
+    if not col_nc or not col_emp:
+        raise ValueError("Colunas NC ou EMPENHADO não encontradas.")
+
+    formula_cols: set[str] = set()
+    if len(todas) > 1:
+        try:
+            formula_row = ws.row_values(2, value_render_option="FORMULA")
+            formula_cols = {headers[i] for i, v in enumerate(formula_row)
+                            if i < len(headers) and str(v).startswith("=")}
+        except Exception:
+            pass
+
+    if "EMPENHADO" in formula_cols:
+        raise ValueError("Coluna EMPENHADO é fórmula — será atualizada automaticamente.")
+
+    from gspread.utils import rowcol_to_a1
+    for i, row in enumerate(todas[1:], start=2):
+        val_nc = row[col_nc - 1] if len(row) >= col_nc else ""
+        if str(val_nc).strip() == str(nc_num).strip():
+            rec = parse(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
+            pct = f"{(total_empenhado / rec * 100):.2f}%".replace(".", ",") if rec else "0,00%"
+            batch = [{"range": rowcol_to_a1(i, col_emp), "values": [[format_moeda(total_empenhado)]]}]
+            if col_pemp and "EMP %" not in formula_cols:
+                batch.append({"range": rowcol_to_a1(i, col_pemp), "values": [[pct]]})
+            ws.batch_update(batch, value_input_option="USER_ENTERED")
+            logger.info("NC %s EMPENHADO definido como %s", nc_num, total_empenhado)
+            return
+    raise ValueError(f"NC '{nc_num}' não encontrada.")
+
+
 def atualizar_nc_empenhado(nc_num: str, valor_req: float) -> None:
     """Soma valor_req ao EMPENHADO da NC. SALDO NC é atualizado pela fórmula da planilha."""
     client = _conectar()

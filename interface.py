@@ -881,7 +881,7 @@ def page_reqs(reqs, ncs):
                  and (not f_pi  or r.get("PI")       in f_pi)
                  and f_val[0] <= parse(r.get("VALOR", 0)) <= f_val[1]]
 
-    b1, b2, b3 = st.columns([1, 1, 3])
+    b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
     with b1:
         if st.button("➕ Nova REQ", type="primary", use_container_width=True):
             st.session_state["form_req"] = not st.session_state.get("form_req", False)
@@ -894,6 +894,21 @@ def page_reqs(reqs, ncs):
             unsafe_allow_html=True,
         )
     with b3:
+        if st.button("🔄 Recalcular NCs", use_container_width=True,
+                     help="Soma todas as REQs Empenhadas e atualiza EMPENHADO nas NCs"):
+            with st.spinner("Recalculando..."):
+                try:
+                    from sheets_nc import recalcular_empenhados
+                    resultado = recalcular_empenhados(reqs)
+                    carregar(forcar=True)
+                    if resultado:
+                        for nc, msg in resultado.items():
+                            st.write(f"**{nc}**: {msg}")
+                    else:
+                        st.info("Nenhuma REQ empenhada encontrada.")
+                except Exception as e:
+                    st.error(f"Erro: {e}")
+    with b4:
         total = sum(parse(r.get("VALOR", 0)) for r in filtradas)
         st.info(f"📝 **{len(filtradas)}** REQs · Total: **{fmt(total)}**")
 
