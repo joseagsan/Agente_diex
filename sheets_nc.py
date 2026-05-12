@@ -165,6 +165,58 @@ def ler_reqs() -> list[dict]:
     return resultado
 
 
+def atualizar_nc_empenhado(nc_num: str, valor_req: float) -> None:
+    """Soma valor_req ao EMPENHADO da NC. SALDO NC é atualizado pela fórmula da planilha."""
+    client = _conectar()
+    planilha = client.open_by_key(SHEET_ID_NC)
+    ws = planilha.worksheet(ABA_NCS)
+    todas = ws.get_all_values()
+    if not todas:
+        return
+    headers = todas[0]
+
+    def _col(name):
+        return headers.index(name) + 1 if name in headers else None
+
+    col_nc   = _col("NC")
+    col_emp  = _col("EMPENHADO")
+    col_pemp = _col("EMP %")
+    col_rec  = _col("RECEBIDO")
+
+    if not col_nc or not col_emp:
+        raise ValueError("Colunas NC ou EMPENHADO não encontradas.")
+
+    # Detecta se EMPENHADO é fórmula (não pode sobrescrever)
+    formula_cols: set[str] = set()
+    if len(todas) > 1:
+        try:
+            formula_row = ws.row_values(2, value_render_option="FORMULA")
+            formula_cols = {headers[i] for i, v in enumerate(formula_row)
+                            if i < len(headers) and str(v).startswith("=")}
+        except Exception:
+            pass
+
+    if "EMPENHADO" in formula_cols:
+        raise ValueError("Coluna EMPENHADO é calculada por fórmula — saldo será atualizado automaticamente.")
+
+    from gspread.utils import rowcol_to_a1
+    for i, row in enumerate(todas[1:], start=2):
+        val_nc = row[col_nc - 1] if len(row) >= col_nc else ""
+        if str(val_nc).strip() == str(nc_num).strip():
+            emp_atual = parse(row[col_emp - 1]) if len(row) >= col_emp else 0.0
+            novo_emp  = emp_atual + valor_req
+            rec       = parse(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
+            pct       = f"{(novo_emp / rec * 100):.2f}%" if rec else "0,00%"
+
+            batch = [{"range": rowcol_to_a1(i, col_emp), "values": [[format_moeda(novo_emp)]]}]
+            if col_pemp and "EMP %" not in formula_cols:
+                batch.append({"range": rowcol_to_a1(i, col_pemp), "values": [[pct]]})
+            ws.batch_update(batch, value_input_option="USER_ENTERED")
+            logger.info("NC %s: EMPENHADO atualizado de %s para %s", nc_num, emp_atual, novo_emp)
+            return
+    raise ValueError(f"NC '{nc_num}' não encontrada na aba NCs.")
+
+
 def atualizar_req(req_num: str, nova_situacao: str, nova_entrada: str, novo_ne: str = "") -> None:
     """Atualiza SITUAÇÃO, ENTRADA NA BDA e NE de uma REQ pelo número."""
     client = _conectar()

@@ -914,8 +914,8 @@ def page_reqs(reqs, ncs):
     k3.metric("📌 Empenhadas", empenhadas)
 
     def _badge_req(sit):
-        return {"Pendente": "🟡", "Enviada": "🔵", "Aprovada": "🟢",
-                "Empenhada": "🟠", "Liquidada": "🟣", "Paga": "⚪"}.get(sit, "⚪")
+        return {"Pendente": "🟡", "Enviada": "🔵", "Aprovada": "🟠",
+                "Empenhada": "🟢", "Liquidada": "🟣", "Paga": "⚪"}.get(sit, "⚪")
 
     todas_cols = {k for r in filtradas for k in r.keys()}
     rows = []
@@ -966,15 +966,31 @@ def page_reqs(reqs, ncs):
         if (orig["SITUAÇÃO"]        != novo["SITUAÇÃO"] or
             orig["ENTRADA NA BDA"]  != novo["ENTRADA NA BDA"] or
             orig["NE"]              != novo["NE"]):
-            changed_rows.append((i, orig["REQ"], novo["SITUAÇÃO"], novo["ENTRADA NA BDA"], novo["NE"]))
+            # Busca NC e valor no registro original filtrado
+            req_orig = filtradas[i] if i < len(filtradas) else {}
+            changed_rows.append({
+                "req":     orig["REQ"],
+                "sit":     novo["SITUAÇÃO"],
+                "sit_ant": orig["SITUAÇÃO"],
+                "entrada": novo["ENTRADA NA BDA"],
+                "ne":      novo["NE"],
+                "nc":      req_orig.get("NC", ""),
+                "valor":   parse(req_orig.get("VALOR", 0)),
+            })
 
     if changed_rows:
         st.info(f"✏️ {len(changed_rows)} linha(s) alterada(s). Clique para salvar.")
         if st.button("💾 Salvar alterações", type="primary", key="btn_salvar_reqs"):
             try:
-                from sheets_nc import atualizar_req
-                for _, req_num, nova_sit, nova_entrada, novo_ne in changed_rows:
-                    atualizar_req(req_num, nova_sit, nova_entrada, novo_ne)
+                from sheets_nc import atualizar_req, atualizar_nc_empenhado
+                for c in changed_rows:
+                    atualizar_req(c["req"], c["sit"], c["entrada"], c["ne"])
+                    # Se mudou para Empenhada, subtrai do saldo da NC
+                    if c["sit"] == "Empenhada" and c["sit_ant"] != "Empenhada" and c["nc"] and c["valor"]:
+                        try:
+                            atualizar_nc_empenhado(c["nc"], c["valor"])
+                        except Exception as e_nc:
+                            st.warning(f"REQ salva, mas não foi possível atualizar saldo da NC: {e_nc}")
                 carregar(forcar=True)
                 st.success("✅ Alterações salvas!")
                 st.rerun()
