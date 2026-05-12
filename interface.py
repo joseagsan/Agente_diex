@@ -128,6 +128,182 @@ def _cl() -> dict:
 
 
 ORGAOS = ["COTER", "COEX", "DGO", "DEC", "DECEX", "12 RM", "Outro"]
+
+SUBITENS: dict[str, list[str]] = {
+    "339030 – Material de Consumo": [
+        "SI 01 – Combustíveis e lubrificantes automotivos",
+        "SI 02 – Combustíveis e lubrificantes de aviação",
+        "SI 03 – Combustíveis e lubrificantes p/ outras finalidades",
+        "SI 04 – Gás e outros materiais engarrafados",
+        "SI 05 – Explosivos e munições",
+        "SI 06 – Alimentos para animais",
+        "SI 07 – Gêneros de alimentação",
+        "SI 08 – Animais para pesquisa e abate",
+        "SI 09 – Material farmacológico",
+        "SI 10 – Material odontológico",
+        "SI 11 – Material químico",
+        "SI 12 – Material de coudelaria / uso zootécnico",
+        "SI 13 – Material de caça e pesca",
+        "SI 14 – Material educativo e esportivo",
+        "SI 15 – Material para festividades e homenagens",
+        "SI 16 – Material de expediente",
+        "SI 17 – Material de TIC (consumo)",
+        "SI 18 – Material/medicamentos veterinários",
+        "SI 19 – Material de acondicionamento e embalagem",
+        "SI 20 – Material de cama, mesa e banho",
+        "SI 21 – Material de copa e cozinha",
+        "SI 22 – Material de limpeza e higienização",
+        "SI 23 – Uniformes, tecidos e aviamentos",
+        "SI 24 – Material p/ manutenção de bens imóveis",
+        "SI 25 – Material p/ manutenção de bens móveis",
+        "SI 26 – Material elétrico e eletrônico",
+        "SI 27 – Material de manobra e patrulhamento",
+        "SI 28 – Material de proteção e segurança",
+        "SI 29 – Material de áudio, vídeo e foto",
+        "SI 30 – Material para comunicações",
+        "SI 31 – Sementes, mudas e insumos",
+        "SI 32 – Suprimento de aviação",
+        "SI 33 – Material para produção industrial",
+        "SI 34 – Sobressalentes p/ embarcações",
+        "SI 35 – Material laboratorial",
+        "SI 36 – Material hospitalar",
+        "SI 37 – Sobressalentes de armamento",
+        "SI 38 – Suprimento de proteção ao voo",
+        "SI 39 – Material p/ manutenção de veículos",
+        "SI 40 – Material biológico",
+        "SI 41 – Material gráfico",
+        "SI 42 – Ferramentas",
+        "SI 43 – Material para reabilitação profissional",
+        "SI 44 – Material de sinalização visual",
+        "SI 45 – Material técnico p/ seleção e treinamento",
+        "SI 46 – Material bibliográfico",
+        "SI 47 – Software (produto)",
+        "SI 48 – Bens móveis não ativáveis",
+        "SI 49 – Bilhetes de passagem",
+        "SI 50 – Bandeiras, flâmulas e insígnias",
+        "SI 51 – Discotecas e filmotecas",
+        "SI 52 – Material sigiloso/reservado",
+        "SI 53 – Material meteorológico",
+        "SI 54 – Material p/ conservação de estradas",
+        "SI 55 – Selos de controle fiscal",
+        "SI 57 – Marcação de fauna silvestre",
+        "SI 58 – Sobressalentes industriais",
+        "SI 59 – Material para divulgação",
+        "SI 89 – Material de consumo no exterior",
+        "SI 91 – Variação cambial negativa",
+        "SI 96 – Pagamento antecipado",
+    ],
+    "339033 – Passagens": [
+        "SI 01 – Passagens no país",
+        "SI 02 – Passagens no exterior",
+    ],
+    "339039 – Serviços de Terceiros (PJ)": [
+        "SI 01 – Assinaturas e anuidades",
+        "SI 02 – Condomínios",
+        "SI 03 – Comissões e corretagens",
+        "SI 05 – Serviços técnicos profissionais",
+        "SI 10 – Locação de imóveis",
+        "SI 11 – Locação de software",
+        "SI 12 – Locação de máquinas e equipamentos",
+        "SI 16 – Manutenção de imóveis",
+        "SI 17 – Manutenção de máquinas",
+        "SI 18 – Estacionamento",
+        "SI 19 – Manutenção de veículos",
+        "SI 22 – Eventos e congressos",
+        "SI 23 – Festividades",
+        "SI 25 – Taxa de administração",
+        "SI 36 – Multas",
+        "SI 37 – Juros e mora",
+        "SI 40 – Alimentação do trabalhador",
+        "SI 41 – Fornecimento de alimentação",
+        "SI 43 – Energia elétrica",
+        "SI 44 – Água e esgoto",
+        "SI 45 – Gás",
+        "SI 47 – Comunicação",
+        "SI 50 – Serviços médico-hospitalares",
+        "SI 58 – Telecomunicações",
+        "SI 59 – Áudio, vídeo e foto",
+        "SI 63 – Serviços gráficos",
+        "SI 69 – Seguros",
+        "SI 74 – Fretes",
+        "SI 77 – Vigilância",
+        "SI 78 – Limpeza e conservação",
+        "SI 79 – Apoio administrativo",
+        "SI 80 – Hospedagem",
+        "SI 83 – Cópias e reprografia",
+        "SI 86 – Patrocínios",
+        "SI 90 – Publicidade legal",
+        "SI 91 – Publicidade institucional",
+        "SI 99 – Outros serviços",
+    ],
+    "339040 – Serviços de TIC": [
+        "SI 01 – Locação de ativos de rede",
+        "SI 02 – Locação de computadores",
+        "SI 03 – Locação de servidores/storage",
+        "SI 04 – Locação de impressoras",
+        "SI 05 – Locação de telefonia",
+        "SI 06 – Licença de software",
+        "SI 07 – Manutenção de software",
+        "SI 09 – Hospedagem (datacenter)",
+        "SI 10 – Suporte a usuários",
+        "SI 11 – Infraestrutura de TIC",
+        "SI 12 – Manutenção de equipamentos",
+        "SI 13 – Comunicação de dados",
+        "SI 14 – Telefonia e dados",
+        "SI 15 – Digitalização de documentos",
+        "SI 16 – Outsourcing de impressão",
+        "SI 17 – Computação em nuvem (IaaS)",
+        "SI 18 – Computação em nuvem (PaaS)",
+        "SI 19 – Computação em nuvem (SaaS)",
+        "SI 20 – Treinamento em TIC",
+        "SI 21 – Serviços técnicos TIC",
+        "SI 22 – Instalação",
+        "SI 23 – Certificados digitais",
+    ],
+    "449052 – Material Permanente": [
+        "SI 02 – Aeronaves",
+        "SI 04 – Equipamentos de medição",
+        "SI 06 – Equipamentos de comunicação",
+        "SI 08 – Equipamentos médicos",
+        "SI 10 – Equipamentos esportivos",
+        "SI 12 – Eletrodomésticos",
+        "SI 14 – Armamentos",
+        "SI 18 – Material bibliográfico",
+        "SI 20 – Embarcações",
+        "SI 22 – Equip. de manobra e patrulhamento",
+        "SI 24 – Equip. de proteção e segurança",
+        "SI 26 – Instrumentos musicais",
+        "SI 28 – Máquinas industriais",
+        "SI 30 – Equipamentos energéticos",
+        "SI 32 – Equipamentos gráficos",
+        "SI 33 – Equipamentos de áudio e vídeo",
+        "SI 34 – Equipamentos diversos",
+        "SI 35 – TIC (permanente)",
+        "SI 36 – Equipamentos de escritório",
+        "SI 37 – TIC de rede",
+        "SI 38 – Ferramentas de oficina",
+        "SI 39 – Equip. hidráulicos e elétricos",
+        "SI 40 – Máquinas agrícolas e rodoviárias",
+        "SI 41 – Computadores",
+        "SI 42 – Mobiliário em geral",
+        "SI 43 – Servidores e storage",
+        "SI 44 – Obras de arte",
+        "SI 45 – Impressoras",
+        "SI 46 – Semoventes",
+        "SI 47 – Telefonia",
+        "SI 48 – Veículos diversos",
+        "SI 50 – Veículos ferroviários",
+        "SI 52 – Veículos automotores",
+        "SI 53 – Carros de combate",
+        "SI 54 – Equipamentos aeronáuticos",
+        "SI 56 – Equip. de proteção ao voo",
+        "SI 57 – Acessórios de veículos",
+        "SI 58 – Equipamentos de mergulho",
+        "SI 60 – Equipamentos marítimos",
+        "SI 83 – Vigilância ambiental",
+        "SI 99 – Outros permanentes",
+    ],
+}
 SITUACOES_REQ = ["Pendente", "Enviada", "Aprovada", "Empenhada", "Liquidada", "Paga"]
 TIPOS_RELATORIO = [
     "Resumo Geral", "NCs Detalhado", "Requisições Detalhado",
@@ -1445,26 +1621,33 @@ def page_gerar_req(reqs, ncs):
     for k, v in [("_fi_item",""), ("_fi_desc",""), ("_fi_und","UN"), ("_fi_vunit", 0.0)]:
         st.session_state.setdefault(k, v)
 
+    # ── Seletor ND / SI (fora do form para cascata) ───────────────────
+    nd_keys = ["— sem ND —"] + list(SUBITENS.keys())
+    snd1, snd2 = st.columns(2)
+    nd_sel = snd1.selectbox("ND (Natureza de Despesa)", nd_keys, key="_fi_nd")
+    si_opts = ["— sem SI —"] + (SUBITENS.get(nd_sel, []) if nd_sel != "— sem ND —" else [])
+    si_sel  = snd2.selectbox("Sub-item (SI)", si_opts, key="_fi_si")
+
     with st.form("f_add_item", clear_on_submit=True):
-        ci1, ci2, ci3 = st.columns([1, 1, 5])
-        item  = ci1.text_input("Item *",   key="_fi_item",  help="Nº do item no pregão")
-        si    = ci2.text_input("Sub-item", placeholder="ex: 1", help="Nº do sub-item (se houver)")
-        desc  = ci3.text_input("Descrição do Item *", key="_fi_desc")
-        ci4, ci5, ci6 = st.columns([1, 1, 2])
-        und   = ci4.text_input("Unid.", key="_fi_und")
-        qtd   = ci5.number_input("Qtd", min_value=0.001, value=1.0, step=1.0, format="%.3f")
-        vunit = ci6.number_input("Valor Unit. (R$)", key="_fi_vunit",
+        ci1, ci2 = st.columns([1, 5])
+        item  = ci1.text_input("Item *",  key="_fi_item", help="Nº do item no pregão")
+        desc  = ci2.text_input("Descrição do Item *", key="_fi_desc")
+        ci3, ci4, ci5 = st.columns([1, 1, 2])
+        und   = ci3.text_input("Unid.", key="_fi_und")
+        qtd   = ci4.number_input("Qtd", min_value=0.001, value=1.0, step=1.0, format="%.3f")
+        vunit = ci5.number_input("Valor Unit. (R$)", key="_fi_vunit",
                                  min_value=0.0, step=0.01, format="%.2f")
         add   = st.form_submit_button("➕ Adicionar Item", use_container_width=True)
 
     if add:
         if item and desc and vunit > 0:
+            si_val  = "" if si_sel == "— sem SI —" else si_sel
             total   = round(qtd * vunit, 2)
             ord_num = len(st.session_state.req_itens) + 1
             st.session_state.req_itens.append({
                 "ORD":            str(ord_num),
                 "ITEM":           item,
-                "SI":             si,
+                "SI":             si_val,
                 "DESCRICAO_ITEM": desc,
                 "UND":            und,
                 "QTD":            str(qtd).replace(".", ","),
