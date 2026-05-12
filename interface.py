@@ -939,25 +939,47 @@ def page_reqs(reqs, ncs):
         })
 
     df_r = pd.DataFrame(rows)
-    st.dataframe(
+    edited = st.data_editor(
         df_r,
         use_container_width=True,
         hide_index=True,
         column_config={
-            "":               st.column_config.TextColumn("",             width=35),
-            "REQ":            st.column_config.TextColumn("REQ",          width=60),
-            "DATA REQ":       st.column_config.TextColumn("Data",         width=90),
-            "NC":             st.column_config.TextColumn("NC",           width=120),
-            "PI":             st.column_config.TextColumn("PI",           width=70),
-            "EMPRESA":        st.column_config.TextColumn("Empresa",      width=160),
-            "DESCRIÇÃO":      st.column_config.TextColumn("Descrição",    width=200),
-            "VALOR":          st.column_config.TextColumn("Valor",        width=120),
-            "SITUAÇÃO":       st.column_config.TextColumn("Situação",     width=100),
+            "":               st.column_config.TextColumn("",             width=35,  disabled=True),
+            "REQ":            st.column_config.TextColumn("REQ",          width=60,  disabled=True),
+            "DATA REQ":       st.column_config.TextColumn("Data",         width=90,  disabled=True),
+            "NC":             st.column_config.TextColumn("NC",           width=120, disabled=True),
+            "PI":             st.column_config.TextColumn("PI",           width=70,  disabled=True),
+            "EMPRESA":        st.column_config.TextColumn("Empresa",      width=160, disabled=True),
+            "DESCRIÇÃO":      st.column_config.TextColumn("Descrição",    width=200, disabled=True),
+            "VALOR":          st.column_config.TextColumn("Valor",        width=120, disabled=True),
+            "SITUAÇÃO":       st.column_config.SelectboxColumn(
+                                  "Situação", width=110,
+                                  options=SITUACOES_REQ),
             "ENTRADA NA BDA": st.column_config.TextColumn("Entrada SALC", width=110),
-            "NE":             st.column_config.TextColumn("NE",           width=90),
-            "OBS":            st.column_config.TextColumn("Obs",          width=120),
+            "NE":             st.column_config.TextColumn("NE",           width=90,  disabled=True),
+            "OBS":            st.column_config.TextColumn("Obs",          width=120, disabled=True),
         },
+        key="req_editor",
     )
+
+    # Detecta mudanças e oferece salvar
+    changed_rows = []
+    for i, (orig, novo) in enumerate(zip(rows, edited.to_dict("records"))):
+        if orig["SITUAÇÃO"] != novo["SITUAÇÃO"] or orig["ENTRADA NA BDA"] != novo["ENTRADA NA BDA"]:
+            changed_rows.append((i, orig["REQ"], novo["SITUAÇÃO"], novo["ENTRADA NA BDA"]))
+
+    if changed_rows:
+        st.info(f"✏️ {len(changed_rows)} linha(s) alterada(s). Clique para salvar.")
+        if st.button("💾 Salvar alterações", type="primary", key="btn_salvar_reqs"):
+            try:
+                from sheets_nc import atualizar_req
+                for _, req_num, nova_sit, nova_entrada in changed_rows:
+                    atualizar_req(req_num, nova_sit, nova_entrada)
+                carregar(forcar=True)
+                st.success("✅ Alterações salvas!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao salvar: {e}")
 
 
 def _form_req(ncs):
