@@ -82,30 +82,23 @@ def _csrf_da_pagina(s: requests.Session, url: str) -> str:
 # ── Passo 1: encontrar compra_id ───────────────────────────────────────────────
 
 def _buscar_uasg_id(s: requests.Session, uasg_code: str, csrf: str) -> str:
-    """Busca o ID interno da UASG via endpoint Select2/Backpack."""
-    endpoints = [
-        f"{BASE}/empenho/buscacompra/fetch/unidade_origem_id",
-        f"{BASE}/empenho/fetch/unidade_origem_id",
-    ]
-    hdrs = {
-        "X-CSRF-TOKEN": csrf,
-        "X-Requested-With": "XMLHttpRequest",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
-    for url in endpoints:
+    """Busca o ID interno da UASG via /api/unidade."""
+    url = f"{BASE}/api/unidade"
+    for param in [{"q": uasg_code}, {"search": uasg_code}, {"codigo": uasg_code}]:
         try:
-            r = s.post(url, json={"q": uasg_code, "page": 1},
-                       headers=hdrs, timeout=(5, 10))
+            r = s.get(url, params={**param, "page": 1},
+                      headers={"Accept": "application/json",
+                               "X-Requested-With": "XMLHttpRequest"},
+                      timeout=(5, 15))
             if r.status_code == 200:
-                results = r.json().get("results", r.json().get("data", []))
-                for item in results:
-                    if uasg_code in str(item.get("text", "")):
-                        logger.info("UASG %s → id=%s", uasg_code, item.get("id"))
-                        return str(item.get("id", ""))
+                for item in r.json().get("data", []):
+                    codigo = str(item.get("codigo", "") or item.get("codigosiasg", ""))
+                    if codigo == uasg_code:
+                        logger.info("UASG %s → id=%s", uasg_code, item["id"])
+                        return str(item["id"])
         except Exception as e:
-            logger.debug("Endpoint %s falhou: %s", url, e)
-    logger.warning("ID interno para UASG %s não encontrado — tentando sem ele.", uasg_code)
+            logger.debug("Param %s falhou: %s", param, e)
+    logger.warning("ID interno para UASG %s não encontrado.", uasg_code)
     return ""
 
 
