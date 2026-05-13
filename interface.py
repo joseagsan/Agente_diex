@@ -792,29 +792,55 @@ def page_ncs(ncs):
         })
 
     df = pd.DataFrame(rows)
-    st.dataframe(
+    edited_nc = st.data_editor(
         df,
         use_container_width=True,
         hide_index=True,
         column_config={
-            "":          st.column_config.TextColumn("",        width=35),
-            "NC":         st.column_config.TextColumn("NC",         width=130),
-            "ORGÃO":      st.column_config.TextColumn("Órgão",      width=110),
-            "OP":         st.column_config.TextColumn("Operação",    width=80),
-            "FINALIDADE": st.column_config.TextColumn("Finalidade",  width=200),
-            "DATA NC":    st.column_config.TextColumn("Data NC",     width=90),
-            "PRAZO":     st.column_config.TextColumn("Prazo",   width=90),
-            "RESTAM":    st.column_config.NumberColumn("Restam", width=75,
-                             help="Dias restantes até o prazo"),
-            "RECEBIDO":  st.column_config.TextColumn("Recebido", width=130),
-            "SALDO NC":  st.column_config.TextColumn("Saldo NC", width=130),
-            "EMP %":     st.column_config.ProgressColumn("Emp %",
-                             format="%.1f%%", min_value=0, max_value=100, width=95),
-            "EM TELA %": st.column_config.ProgressColumn("Em Tela %",
-                             format="%.1f%%", min_value=0, max_value=100, width=95),
-            "SITUAÇÃO":  st.column_config.TextColumn("Situação", width=120),
+            "":           st.column_config.TextColumn("",           width=35,  disabled=True),
+            "NC":         st.column_config.TextColumn("NC",         width=130, disabled=True),
+            "ORGÃO":      st.column_config.TextColumn("Órgão",      width=110, disabled=True),
+            "OP":         st.column_config.TextColumn("Operação",   width=80,  disabled=True),
+            "FINALIDADE": st.column_config.TextColumn("Finalidade", width=200),
+            "DATA NC":    st.column_config.TextColumn("Data NC",    width=90),
+            "PRAZO":      st.column_config.TextColumn("Prazo",      width=90),
+            "RESTAM":     st.column_config.NumberColumn("Restam",   width=75,  disabled=True),
+            "RECEBIDO":   st.column_config.TextColumn("Recebido",   width=130, disabled=True),
+            "SALDO NC":   st.column_config.TextColumn("Saldo NC",   width=130, disabled=True),
+            "EMP %":      st.column_config.ProgressColumn("Emp %",
+                              format="%.1f%%", min_value=0, max_value=100, width=95),
+            "EM TELA %":  st.column_config.ProgressColumn("Em Tela %",
+                              format="%.1f%%", min_value=0, max_value=100, width=95),
+            "SITUAÇÃO":   st.column_config.TextColumn("Situação",   width=120, disabled=True),
         },
+        key="nc_editor",
     )
+
+    # Detecta alterações em FINALIDADE, DATA NC ou PRAZO
+    nc_changes = []
+    for i, (orig, novo) in enumerate(zip(rows, edited_nc.to_dict("records"))):
+        if (orig["FINALIDADE"] != novo["FINALIDADE"] or
+            orig["DATA NC"]    != novo["DATA NC"] or
+            orig["PRAZO"]      != novo["PRAZO"]):
+            nc_changes.append({
+                "nc":        orig["NC"],
+                "finalidade": novo["FINALIDADE"],
+                "data_nc":   novo["DATA NC"],
+                "prazo":     novo["PRAZO"],
+            })
+
+    if nc_changes:
+        st.info(f"✏️ {len(nc_changes)} NC(s) alterada(s).")
+        if st.button("💾 Salvar alterações NCs", type="primary", key="btn_salvar_ncs"):
+            try:
+                from sheets_nc import atualizar_nc_campos
+                for c in nc_changes:
+                    atualizar_nc_campos(c["nc"], c["finalidade"], c["data_nc"], c["prazo"])
+                carregar(forcar=True)
+                st.success("✅ Alterações salvas!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro: {e}")
 
 
 def _form_nc():

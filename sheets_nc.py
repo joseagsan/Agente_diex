@@ -264,6 +264,42 @@ def _set_nc_empenhado(nc_num: str, total_empenhado: float) -> None:
     raise ValueError(f"NC '{nc_num}' não encontrada.")
 
 
+def atualizar_nc_campos(nc_num: str, finalidade: str, data_nc: str, prazo: str) -> None:
+    """Atualiza FINALIDADE, DATA NC e PRAZO de uma NC."""
+    client = _conectar()
+    planilha = client.open_by_key(SHEET_ID_NC)
+    ws = planilha.worksheet(ABA_NCS)
+    todas = ws.get_all_values()
+    if not todas:
+        raise ValueError("Aba NCs vazia.")
+    headers = todas[0]
+
+    def _col(name):
+        return headers.index(name) + 1 if name in headers else None
+
+    col_nc   = _col("NC")
+    col_fin  = _col("FINALIDADE")
+    col_data = _col("DATA NC")
+    col_prz  = _col("PRAZO")
+
+    if not col_nc:
+        raise ValueError("Coluna NC não encontrada.")
+
+    from gspread.utils import rowcol_to_a1
+    for i, row in enumerate(todas[1:], start=2):
+        val = row[col_nc - 1] if len(row) >= col_nc else ""
+        if str(val).strip() == str(nc_num).strip():
+            batch = []
+            if col_fin:  batch.append({"range": rowcol_to_a1(i, col_fin),  "values": [[finalidade]]})
+            if col_data: batch.append({"range": rowcol_to_a1(i, col_data), "values": [[data_nc]]})
+            if col_prz:  batch.append({"range": rowcol_to_a1(i, col_prz),  "values": [[prazo]]})
+            if batch:
+                ws.batch_update(batch, value_input_option="USER_ENTERED")
+            logger.info("NC %s atualizada: finalidade/data/prazo", nc_num)
+            return
+    raise ValueError(f"NC '{nc_num}' não encontrada.")
+
+
 def atualizar_nc_empenhado(nc_num: str, valor_req: float) -> None:
     """Soma valor_req ao EMPENHADO da NC. SALDO NC é atualizado pela fórmula da planilha."""
     client = _conectar()
