@@ -787,7 +787,7 @@ def page_ncs(ncs):
             "RECEBIDO":   fmt(parse(nc.get("RECEBIDO", 0))),
             "SALDO NC":   fmt(parse(nc.get("SALDO NC",  0))),
             "EMP %":      _parse_pct(nc.get("EMP %", "0")),
-            "EM TELA %":  _parse_pct(nc.get("EM TELA %", "0")),
+            "EM TELA %":  max(0.0, 100.0 - _parse_pct(nc.get("EMP %", "0"))),
             "SITUAÇÃO":   nc.get("SITUAÇÃO", ""),
         })
 
