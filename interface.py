@@ -1611,12 +1611,17 @@ def page_gerar_req(reqs, ncs):
     st.divider()
     st.subheader("🔍 Pesquisar Pregão — contratos.comprasnet.gov.br")
 
-    p1, p2, p3 = st.columns([1, 2, 2])
+    st.info(
+        "💡 **Como encontrar o ID da compra:** acesse "
+        "[contratos.comprasnet.gov.br/empenho/buscacompra](https://contratos.comprasnet.gov.br/empenho/buscacompra), "
+        "pesquise o pregão e copie o número da URL: `.../fornecedor/**7194897**`"
+    )
+    p1, p2 = st.columns([1, 2])
     p_uasg   = p1.text_input("UASG", value=UG_PADRAO, key="pesq_uasg")
     p_pregao = p2.text_input("Nº Pregão/Ano", placeholder="ex: 90009/2025", key="pesq_pregao")
-    p_cid    = p3.text_input("ID direto (opcional)", placeholder="ex: 7194897",
-                              key="pesq_cid",
-                              help="Se a busca automática falhar, informe o ID da URL do portal")
+    p_cid    = st.text_input("🔑 ID da Compra (da URL do portal)",
+                              placeholder="ex: 7194897 — encontrado na URL após pesquisar no portal",
+                              key="pesq_cid")
 
     col_pesq, col_limpar = st.columns([4, 1])
     btn_pesquisar = col_pesq.button("🔍 Pesquisar", key="btn_pesquisar", use_container_width=True)
