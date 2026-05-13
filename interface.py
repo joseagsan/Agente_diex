@@ -357,14 +357,14 @@ def _frases(tipo: str) -> list[str]:
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def _pesquisar_pregao(uasg: str, num_pregao: str) -> tuple:
+def _pesquisar_pregao(uasg: str, num_pregao: str, compra_id_direto: str = "") -> tuple:
     """Cache da pesquisa — persiste mesmo com reset de sessão (30 min TTL)."""
-    from pesquisa_compras import buscar_itens_pregao
+    from pesquisa_compras import buscar_pregao
     try:
-        r = buscar_itens_pregao(uasg, num_pregao)
-        return r.itens, r.log, r.url_usada
+        r = buscar_pregao(uasg, num_pregao, compra_id_direto)
+        return r.fornecedores, r.compra_id, r.log
     except Exception as e:
-        return [], [f"Erro: {e}"], ""
+        return [], "", [f"Erro: {e}"]
 
 
 def carregar(forcar: bool = False):
@@ -1607,196 +1607,105 @@ def page_gerar_req(reqs, ncs):
         }
         st.success("✅ Dados básicos confirmados.")
 
-    # ── Pesquisa no portal
+    # ── Pesquisa no portal (contratos.comprasnet.gov.br)
     st.divider()
-    st.subheader("🔍 Pesquisar Item no Portal Compras.gov.br")
+    st.subheader("🔍 Pesquisar Pregão — contratos.comprasnet.gov.br")
 
-    p1, p2 = st.columns([1, 2])
-    p_uasg   = p1.text_input("UASG", value=UG_PADRAO, key="pesq_uasg",
-                              help="Código da unidade gerenciadora (ex: 160482)")
-    p_pregao = p2.text_input("Nº do Pregão", placeholder="ex: 90008/2025",
-                              key="pesq_pregao",
-                              help="Formato: SEQUENCIAL/ANO — ex: 90008/2025")
+    p1, p2, p3 = st.columns([1, 2, 2])
+    p_uasg   = p1.text_input("UASG", value=UG_PADRAO, key="pesq_uasg")
+    p_pregao = p2.text_input("Nº Pregão/Ano", placeholder="ex: 90009/2025", key="pesq_pregao")
+    p_cid    = p3.text_input("ID direto (opcional)", placeholder="ex: 7194897",
+                              key="pesq_cid",
+                              help="Se a busca automática falhar, informe o ID da URL do portal")
 
     col_pesq, col_limpar = st.columns([4, 1])
-    btn_pesquisar = col_pesq.button("🔍 Pesquisar no Portal Compras", key="btn_pesquisar", use_container_width=True)
-    if col_limpar.button("🗑️ Limpar cache", key="btn_limpar_cache", use_container_width=True):
+    btn_pesquisar = col_pesq.button("🔍 Pesquisar", key="btn_pesquisar", use_container_width=True)
+    if col_limpar.button("🗑️ Limpar", key="btn_limpar_cache", use_container_width=True):
         _pesquisar_pregao.clear()
-        st.session_state.pop("pesq_resultados", None)
-        st.session_state.pop("pesq_log", None)
-        st.session_state.pop("pesq_forn_map", None)
+        for k in ("pesq_fornecedores", "pesq_compra_id", "pesq_log", "pesq_itens_cache"):
+            st.session_state.pop(k, None)
         st.rerun()
+
     if btn_pesquisar:
-        if not p_pregao:
-            st.warning("Digite o número do pregão.")
+        if not p_pregao and not p_cid:
+            st.warning("Digite o número do pregão ou o ID da compra.")
         else:
-            with st.spinner("🌐 Buscando..."):
-                itens, log, url = _pesquisar_pregao(p_uasg, p_pregao)
-            st.session_state["pesq_resultados"] = itens
-            st.session_state["pesq_url"]        = url
-            st.session_state["pesq_log"]        = log
-            if not itens:
-                erro_log = [l for l in log if str(l).startswith("Erro:")]
-                if erro_log:
-                    st.error(erro_log[0])
-                else:
-                    st.warning("Nenhum item encontrado.")
-                with st.expander("🔎 Log de diagnóstico"):
-                    for linha in log:
-                        st.text(linha)
+            with st.spinner("🌐 Buscando no portal..."):
+                fornecedores, compra_id, log = _pesquisar_pregao(p_uasg, p_pregao, p_cid)
+            st.session_state["pesq_fornecedores"] = fornecedores
+            st.session_state["pesq_compra_id"]    = compra_id
+            st.session_state["pesq_log"]          = log
+            st.session_state["pesq_itens_cache"]  = {}
+            if not fornecedores:
+                erro = next((l for l in log if "Erro:" in str(l)), None)
+                st.error(erro or "Nenhum fornecedor encontrado.")
+                with st.expander("🔎 Log"):
+                    for linha in log: st.text(linha)
 
-    # Exibe resultados
-    resultados_pesq = st.session_state.get("pesq_resultados", [])
-    if resultados_pesq:
-        from pesquisa_compras import buscar_detalhe_item
+    # ── Exibe fornecedores e itens ─────────────────────────────────────────────
+    fornecedores_pesq = st.session_state.get("pesq_fornecedores", [])
+    compra_id_pesq    = st.session_state.get("pesq_compra_id", "")
 
-        forn_atual = st.session_state.get("_b2_forn", "")
+    if fornecedores_pesq:
+        from pesquisa_compras import buscar_itens_fornecedor
+        forn_atual           = st.session_state.get("_b2_forn", "")
         itens_ja_adicionados = {it["ITEM"] for it in st.session_state.req_itens}
+        itens_cache          = st.session_state.get("pesq_itens_cache", {})
+        pregao_atual         = st.session_state.get("pesq_pregao", "")
 
-        st.success(f"✅ {len(resultados_pesq)} itens encontrados.")
+        st.success(f"✅ {len(fornecedores_pesq)} fornecedor(es) | Compra ID: {compra_id_pesq}")
         if forn_atual:
             st.info(f"🔒 Vinculado a **{forn_atual}**")
 
-        # ── Carregar fornecedores para ver agrupado ───────────────────────────
-        forn_map = st.session_state.get("pesq_forn_map", {})
-        forn_map_pregao = st.session_state.get("pesq_forn_map_pregao", "")
-        pregao_atual = st.session_state.get("pesq_pregao", "")
+        for fidx, forn in enumerate(fornecedores_pesq):
+            forn_id   = forn["fornecedor_id"]
+            forn_nome = forn["nome"]
+            cnpj_grp  = forn["cnpj"]
+            label_exp = f"🏢 **{forn_nome}** — {cnpj_grp}"
 
-        # Invalida cache se o pregão mudou
-        if forn_map_pregao != pregao_atual:
-            forn_map = {}
-            st.session_state["pesq_forn_map"] = {}
-
-        if not forn_map:
-            if st.button("🔍 Carregar fornecedores (agrupa itens por empresa)",
-                         use_container_width=True):
-                prog = st.progress(0, text="Carregando detalhes dos itens...")
-                mapa = {}
-                for i, res in enumerate(resultados_pesq):
-                    prog.progress((i + 1) / len(resultados_pesq),
-                                  text=f"{i+1}/{len(resultados_pesq)} — {res.get('descricao','')[:35]}")
-                    det = buscar_detalhe_item(str(res.get("compra_id","")), str(res.get("item_id","")))
-                    mapa[res.get("numero_item","")] = {**res, **det}
-                prog.empty()
-                st.session_state["pesq_forn_map"]       = mapa
-                st.session_state["pesq_forn_map_pregao"] = pregao_atual
-                st.rerun()
-        else:
-            # Agrupa por fornecedor
-            from collections import defaultdict
-            grupos_forn: dict = defaultdict(list)
-            for num, dados in forn_map.items():
-                f = dados.get("fornecedor") or "Sem fornecedor"
-                grupos_forn[f].append(dados)
-
-            st.caption(f"📊 {len(grupos_forn)} fornecedor(es) | {len(forn_map)} itens")
-            if st.button("🔄 Recarregar fornecedores"):
-                st.session_state["pesq_forn_map"] = {}
-                st.rerun()
-
-            for forn_grp, itens_grp in sorted(grupos_forn.items()):
-                cnpj_grp = itens_grp[0].get("cnpj","")
-                vig_grp  = itens_grp[0].get("vigencia_fim","")
-                with st.expander(f"🏢 **{forn_grp}** — {len(itens_grp)} item(ns)", expanded=False):
-                    for gidx, dados in enumerate(itens_grp):
-                        num = dados.get("numero_item","")
+            with st.expander(label_exp, expanded=False):
+                if forn_id not in itens_cache:
+                    if st.button("📦 Carregar itens", key=f"load_{forn_id}"):
+                        with st.spinner("Carregando..."):
+                            itens = buscar_itens_fornecedor(compra_id_pesq, forn_id)
+                        itens_cache[forn_id] = itens
+                        st.session_state["pesq_itens_cache"] = itens_cache
+                        st.rerun()
+                else:
+                    itens = itens_cache[forn_id]
+                    st.caption(f"{len(itens)} item(ns)")
+                    for gidx, item in enumerate(itens):
+                        num = item.get("numero", "")
                         ja  = num in itens_ja_adicionados
                         ca, cb, cc = st.columns([1, 8, 2])
                         ca.markdown(f"**{num}**")
-                        cb.markdown(f"{dados.get('descricao_det') or dados.get('descricao','')[:80]} — {dados.get('valor_unit','')}")
+                        v   = item.get("valor_unit", 0.0)
+                        cb.markdown(f"{item.get('descricao','')[:80]} — **{fmt(v)}**")
                         if ja:
                             cc.markdown("✓")
-                        elif cc.button("➕", key=f"ug_{forn_grp[:8]}_{gidx}"):
-                            if forn_atual and forn_grp != forn_atual:
+                        elif cc.button("➕", key=f"add_{forn_id}_{gidx}"):
+                            if forn_atual and forn_nome != forn_atual:
                                 st.error(f"❌ Req vinculada a **{forn_atual}**.")
                             else:
-                                v = float(dados.get("valor_unit_num") or 0)
-                                _si_grp = _num_si(st.session_state.get("_fi_si", ""))
+                                _si = _num_si(st.session_state.get("_fi_si", ""))
                                 st.session_state.req_itens.append({
                                     "ORD":            str(len(st.session_state.req_itens) + 1),
                                     "ITEM":           str(num),
-                                    "SI":             _si_grp,
-                                    "DESCRICAO_ITEM": dados.get("descricao_det") or dados.get("descricao",""),
-                                    "UND":            str(dados.get("und") or "UN"),
+                                    "SI":             _si,
+                                    "DESCRICAO_ITEM": item.get("descricao", ""),
+                                    "UND":            "UN",
                                     "QTD":            "1,000",
                                     "VALOR_UNIT":     fmt(v),
                                     "VALOR_TOTAL":    fmt(v),
                                     "_total":         v,
                                     "_vunit":         v,
                                 })
-                                st.session_state["_b2_forn"]   = forn_grp
+                                st.session_state["_b2_forn"]   = forn_nome
                                 st.session_state["_b2_cnpj"]   = cnpj_grp
                                 st.session_state["_b2_pregao"] = pregao_atual
                                 st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                                st.session_state["_b2_vig"]    = vig_grp
+                                st.session_state["_b2_vig"]    = ""
                                 st.session_state["_b2_ver"]    = st.session_state.get("_b2_ver", 0) + 1
-
-            # Se forn_map está carregado, não precisa mais do expander flat abaixo
-            forn_map = st.session_state.get("pesq_forn_map", {})
-
-        # Lista flat paginada (antes de carregar fornecedores)
-        if not st.session_state.get("pesq_forn_map"):
-            PAGE_UI = 50
-            total_itens = len(resultados_pesq)
-            total_pags = (total_itens + PAGE_UI - 1) // PAGE_UI
-            pag_key = "pesq_pag"
-            if pag_key not in st.session_state:
-                st.session_state[pag_key] = 0
-            pag = st.session_state[pag_key]
-
-            inicio = pag * PAGE_UI
-            fim    = min(inicio + PAGE_UI, total_itens)
-
-            st.caption(f"📋 Itens {inicio+1}–{fim} de {total_itens}")
-            nav1, nav2, nav3 = st.columns([1, 6, 1])
-            if nav1.button("◀", key="pesq_prev", disabled=pag == 0):
-                st.session_state[pag_key] = pag - 1
-                st.rerun()
-            nav2.markdown(f"<center>Página {pag+1} / {total_pags}</center>", unsafe_allow_html=True)
-            if nav3.button("▶", key="pesq_next", disabled=pag >= total_pags - 1):
-                st.session_state[pag_key] = pag + 1
-                st.rerun()
-
-            for idx, res in enumerate(resultados_pesq[inicio:fim], start=inicio):
-                num = res.get("numero_item", "")
-                ja_adicionado = num in itens_ja_adicionados
-                ca, cb, cc = st.columns([1, 8, 2])
-                ca.markdown(f"**{num}**" + (" ✓" if ja_adicionado else ""))
-                cb.markdown(res.get("descricao", "")[:80])
-                label = "✓ Adicionado" if ja_adicionado else "➕ Usar"
-                if not ja_adicionado and cc.button(label, key=f"usar_item_{idx}"):
-                    with st.spinner("Carregando detalhes..."):
-                        det = buscar_detalhe_item(str(res.get("compra_id","")), str(res.get("item_id","")))
-                    if det.get("_erro"):
-                        st.error(f"❌ {det['_erro']}")
-                        st.stop()
-                    if not det.get("fornecedor") and not det.get("valor_unit_num"):
-                        st.warning("⚠️ Detalhe retornou vazio — verifique os logs do Railway (DETALHE texto).")
-                    forn_item = str(det.get("fornecedor",""))
-                    if forn_atual and forn_item and forn_item != forn_atual:
-                        st.error(f"❌ Item de **{forn_item}** — req vinculada a **{forn_atual}**. Limpe os itens para trocar.")
-                    else:
-                        v    = float(det.get("valor_unit_num") or 0)
-                        desc = det.get("descricao_det") or str(res.get("descricao",""))
-                        _si_usar = _num_si(st.session_state.get("_fi_si", ""))
-                        st.session_state.req_itens.append({
-                            "ORD":            str(len(st.session_state.req_itens) + 1),
-                            "ITEM":           str(num),
-                            "SI":             _si_usar,
-                            "DESCRICAO_ITEM": desc,
-                            "UND":            str(det.get("und") or "UN"),
-                            "QTD":            "1,000",
-                            "VALOR_UNIT":     fmt(v),
-                            "VALOR_TOTAL":    fmt(v),
-                            "_total":         v,
-                            "_vunit":         v,
-                        })
-                        st.session_state["_b2_forn"]   = forn_item or forn_atual
-                        st.session_state["_b2_cnpj"]   = str(det.get("cnpj",""))
-                        st.session_state["_b2_pregao"] = str(st.session_state.get("pesq_pregao",""))
-                        st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                        st.session_state["_b2_vig"]    = str(det.get("vigencia_fim",""))
-                        st.session_state["_b2_ver"]    = st.session_state.get("_b2_ver", 0) + 1
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
