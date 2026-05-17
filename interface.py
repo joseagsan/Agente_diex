@@ -786,41 +786,6 @@ def page_ncs(ncs, reqs=None):
         st.info("Nenhuma NC encontrada com os filtros aplicados.")
         return
 
-    # ── Tabela resumo de saldo (calculado a partir das REQs) ──────────
-    st.subheader("💰 Saldo por NC")
-    resumo_rows = []
-    for nc in filtradas:
-        nc_num   = nc.get("NC", "")
-        recebido = parse(nc.get("RECEBIDO", 0))
-        empenhado = emp_por_nc.get(nc_num, 0.0)
-        saldo    = max(0.0, recebido - empenhado)
-        pct      = round(empenhado / recebido * 100, 1) if recebido else 0.0
-        resumo_rows.append({
-            "NC":         nc_num,
-            "ORGÃO":      nc.get("ORGÃO", ""),
-            "RECEBIDO":   fmt(recebido),
-            "EMPENHADO":  fmt(empenhado),
-            "SALDO":      fmt(saldo),
-            "EMP %":      pct,
-        })
-    df_resumo = pd.DataFrame(resumo_rows)
-    st.dataframe(
-        df_resumo,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "NC":        st.column_config.TextColumn("NC",        width=130),
-            "ORGÃO":     st.column_config.TextColumn("Órgão",     width=110),
-            "RECEBIDO":  st.column_config.TextColumn("Recebido",  width=130),
-            "EMPENHADO": st.column_config.TextColumn("Empenhado", width=130),
-            "SALDO":     st.column_config.TextColumn("Saldo",     width=130),
-            "EMP %":     st.column_config.ProgressColumn("Emp %",
-                             format="%.1f%%", min_value=0, max_value=100, width=90),
-        },
-    )
-    st.divider()
-    st.subheader("📋 Detalhes das NCs")
-
     # ── Tabela enriquecida ─────────────────────────────────────────────
     rows = []
     for nc in filtradas:
