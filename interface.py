@@ -792,7 +792,7 @@ def page_ncs(ncs, reqs=None):
         d         = _dias_prazo(nc)
         nc_num    = nc.get("NC", "")
         recebido  = parse(nc.get("RECEBIDO", 0))
-        empenhado = emp_por_nc.get(nc_num, 0.0)
+        empenhado = parse(nc.get("EMPENHADO", 0))
         saldo     = max(0.0, recebido - empenhado)
         pct_emp   = round(empenhado / recebido * 100, 1) if recebido else 0.0
         rows.append({
