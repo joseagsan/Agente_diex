@@ -807,6 +807,7 @@ def page_ncs(ncs, reqs=None):
             "RECEBIDO":   fmt(recebido),
             "EMPENHADO":  fmt(empenhado),
             "SALDO":      fmt(saldo),
+            "EMP %":      pct_emp,
             "SITUAÇÃO":   nc.get("SITUAÇÃO", ""),
         })
 
@@ -827,6 +828,8 @@ def page_ncs(ncs, reqs=None):
             "RECEBIDO":   st.column_config.TextColumn("Recebido",   width=130, disabled=True),
             "EMPENHADO":  st.column_config.TextColumn("Empenhado",  width=130, disabled=True),
             "SALDO":      st.column_config.TextColumn("Saldo",      width=130, disabled=True),
+            "EMP %":      st.column_config.ProgressColumn("Emp %",
+                              format="%.1f%%", min_value=0, max_value=100, width=90),
             "SITUAÇÃO":   st.column_config.TextColumn("Situação",   width=120, disabled=True),
         },
         key="nc_editor",
