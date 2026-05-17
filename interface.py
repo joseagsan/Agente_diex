@@ -1655,6 +1655,13 @@ def page_gerar_req(reqs, ncs):
         from pesquisa_compras import buscar_itens_fornecedor
         forn_atual           = st.session_state.get("_b2_forn", "")
         itens_ja_adicionados = {it["ITEM"] for it in st.session_state.req_itens}
+
+        # Mostra ND/SI que será aplicado ao clicar ➕
+        _nd_atual = st.session_state.get("_fi_nd", "— sem ND —")
+        _si_atual = st.session_state.get("_fi_si", "— sem SI —")
+        _si_num   = _num_si(_si_atual)
+        if _nd_atual != "— sem ND —":
+            st.caption(f"📋 Ao clicar ➕: **ND** = {_nd_atual.split('–')[0].strip()} | **SI** = {_si_num or '—'} *(ajuste abaixo se necessário)*")
         itens_cache          = st.session_state.get("pesq_itens_cache", {})
         pregao_atual         = st.session_state.get("pesq_pregao", "")
 
@@ -1758,6 +1765,10 @@ def page_gerar_req(reqs, ncs):
         if nd_match and st.session_state.get("_fi_nd_prev_nc") != nd_prev_key:
             st.session_state["_fi_nd"] = nd_match
             st.session_state["_fi_nd_prev_nc"] = nd_prev_key
+            # Auto-seleciona o primeiro SI disponível para o ND
+            primeiros_si = SUBITENS.get(nd_match, [])
+            if primeiros_si and st.session_state.get("_fi_si", "— sem SI —") == "— sem SI —":
+                st.session_state["_fi_si"] = primeiros_si[0]
 
     nd_keys = ["— sem ND —"] + list(SUBITENS.keys())
     snd1, snd2 = st.columns(2)
