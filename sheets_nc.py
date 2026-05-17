@@ -173,8 +173,13 @@ def recalcular_empenhados(reqs: list[dict]) -> dict[str, str]:
     from collections import defaultdict
     totais: dict[str, float] = defaultdict(float)
     for r in reqs:
-        if r.get("SITUAÇÃO") == "Empenhada" and r.get("NC"):
-            totais[r["NC"]] += parse_moeda(r.get("VALOR", 0))
+        nc    = r.get("NC", "")
+        valor = parse_moeda(r.get("VALOR", 0))
+        sit   = r.get("SITUAÇÃO", "")
+        if sit == "Empenhada" and nc:
+            totais[nc] += valor
+        elif sit == "Anulado" and nc:
+            totais[nc] -= valor  # anulação devolve ao saldo
 
     resultados = {}
     for nc_num, total in totais.items():
@@ -339,7 +344,7 @@ def atualizar_nc_empenhado(nc_num: str, valor_req: float) -> None:
         val_nc = row[col_nc - 1] if len(row) >= col_nc else ""
         if str(val_nc).strip() == str(nc_num).strip():
             emp_atual = parse_moeda(row[col_emp - 1]) if len(row) >= col_emp else 0.0
-            novo_emp  = emp_atual + valor_req
+            novo_emp  = max(0.0, round(emp_atual + valor_req, 2))  # negativo = anulação
             rec       = parse_moeda(row[col_rec - 1]) if col_rec and len(row) >= col_rec else 0.0
             pct       = f"{(novo_emp / rec * 100):.2f}%" if rec else "0,00%"
 

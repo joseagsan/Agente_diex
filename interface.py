@@ -304,7 +304,7 @@ SUBITENS: dict[str, list[str]] = {
         "SI 99 – Outros permanentes",
     ],
 }
-SITUACOES_REQ = ["Pendente", "Enviada", "Aprovada", "Empenhada", "Liquidada", "Paga"]
+SITUACOES_REQ = ["Pendente", "Enviada", "Aprovada", "Empenhada", "Anulado", "Liquidada", "Paga"]
 TIPOS_RELATORIO = [
     "Resumo Geral", "NCs Detalhado", "Requisições Detalhado",
     "NCs por Operação", "NCs Próximas do Vencimento (30 dias)", "REQs Pendentes",
@@ -993,7 +993,7 @@ def page_reqs(reqs, ncs):
             "VALOR":          st.column_config.TextColumn("Valor",        width=120, disabled=True),
             "SITUAÇÃO":       st.column_config.SelectboxColumn(
                                   "Situação", width=110,
-                                  options=["Pendente", "Empenhada"]),
+                                  options=["Pendente", "Empenhada", "Anulado"]),
             "ENTRADA NA BDA": st.column_config.TextColumn("Entrada SALC", width=110),
             "NE":             st.column_config.TextColumn("NE",           width=90),
             "OBS":            st.column_config.TextColumn("Obs",          width=120, disabled=True),
@@ -1026,12 +1026,21 @@ def page_reqs(reqs, ncs):
                 from sheets_nc import atualizar_req, atualizar_nc_empenhado
                 for c in changed_rows:
                     atualizar_req(c["req"], c["sit"], c["entrada"], c["ne"])
-                    # Se mudou para Empenhada, subtrai do saldo da NC
-                    if c["sit"] == "Empenhada" and c["sit_ant"] != "Empenhada" and c["nc"] and c["valor"]:
+                    nc, valor = c["nc"], c["valor"]
+                    if not nc or not valor:
+                        continue
+                    # Empenhada: diminui saldo da NC (adiciona ao empenhado)
+                    if c["sit"] == "Empenhada" and c["sit_ant"] != "Empenhada":
                         try:
-                            atualizar_nc_empenhado(c["nc"], c["valor"])
+                            atualizar_nc_empenhado(nc, valor)
                         except Exception as e_nc:
-                            st.warning(f"REQ salva, mas não foi possível atualizar saldo da NC: {e_nc}")
+                            st.warning(f"REQ salva, saldo NC não atualizado: {e_nc}")
+                    # Anulado: aumenta saldo da NC (subtrai do empenhado)
+                    elif c["sit"] == "Anulado" and c["sit_ant"] != "Anulado":
+                        try:
+                            atualizar_nc_empenhado(nc, -valor)
+                        except Exception as e_nc:
+                            st.warning(f"REQ salva, saldo NC não atualizado: {e_nc}")
                 carregar(forcar=True)
                 st.success("✅ Alterações salvas!")
                 st.rerun()
@@ -1059,7 +1068,7 @@ def _form_req(ncs):
         entrada_salc = c1.date_input("Entrada na SALC", value=None)
 
         pi       = c2.text_input("PI", value=nc_d.get("PI", ""))
-        tipo     = c2.selectbox("Tipo", ["Ordinário", "Especial"])
+        tipo     = c2.selectbox("Tipo", ["Ordinário", "Especial", "Anulação"])
         ne       = c2.text_input("NE")
         situacao = c2.selectbox("Situação", SITUACOES_REQ)
 
@@ -1171,7 +1180,7 @@ def _confirmar_req(dados, ncs):
         data_req = c1.text_input("Data REQ (DD/MM/YYYY)", value=dados.get("DATA REQ", ""))
         empresa  = c1.text_input("Empresa",               value=dados.get("EMPRESA", ""))
         pi       = c2.text_input("PI",                    value=dados.get("PI", ""))
-        tipo     = c2.selectbox("Tipo", ["Ordinário", "Especial"])
+        tipo     = c2.selectbox("Tipo", ["Ordinário", "Especial", "Anulação"])
         ne       = c2.text_input("NE",                    value=dados.get("NE", ""))
         situacao = c2.selectbox("Situação", SITUACOES_REQ)
         finalidade = st.text_area("Finalidade", value=dados.get("FINALIDADE", ""))
