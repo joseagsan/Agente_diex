@@ -906,78 +906,89 @@ def _form_nc():
 def page_reqs(reqs, ncs):
     st.title("📝 Requisições")
 
-    with st.expander("🔍 Filtros", expanded=False):
-        f1, f2, f3 = st.columns(3)
-        f_sit  = f1.multiselect("Situação", sorted({r.get("SITUAÇÃO", "") for r in reqs if r.get("SITUAÇÃO")}))
-        f_emp  = f2.multiselect("Empresa",  sorted({r.get("EMPRESA", "")  for r in reqs if r.get("EMPRESA")}))
-        f_nc   = f3.multiselect("NC",       sorted({r.get("NC", "")       for r in reqs if r.get("NC")}))
-        f4, f5, f6 = st.columns(3)
-        f_tipo = f4.multiselect("Tipo",     ["Ordinário", "Especial"])
-        f_pi   = f5.multiselect("PI",       sorted({r.get("PI", "") for r in reqs if r.get("PI")}))
-        vals   = [parse(r.get("VALOR", 0)) for r in reqs if parse(r.get("VALOR", 0)) > 0]
-        v_max  = max(vals) if vals else 100000.0
-        f_val  = f6.slider("Faixa de valor (R$)", 0.0, float(v_max), (0.0, float(v_max)), step=500.0)
+    def _badge_req(sit):
+        return {"Pendente": "🟡", "Enviada": "🔵", "Aprovada": "🟠",
+                "Empenhada": "🟢", "Anulado": "🔴", "Liquidada": "🟣",
+                "Paga": "⚪"}.get(sit, "⚪")
 
-    filtradas = [r for r in reqs
-                 if (not f_sit  or r.get("SITUAÇÃO") in f_sit)
-                 and (not f_emp or r.get("EMPRESA")  in f_emp)
-                 and (not f_nc  or r.get("NC")       in f_nc)
-                 and (not f_tipo or r.get("TIPO")    in f_tipo)
-                 and (not f_pi  or r.get("PI")       in f_pi)
-                 and f_val[0] <= parse(r.get("VALOR", 0)) <= f_val[1]]
+    # ── KPIs globais ──────────────────────────────────────────────────
+    total_geral   = sum(parse(r.get("VALOR", 0)) for r in reqs)
+    n_pendentes   = sum(1 for r in reqs if r.get("SITUAÇÃO") == "Pendente")
+    n_empenhadas  = sum(1 for r in reqs if r.get("SITUAÇÃO") == "Empenhada")
+    n_anuladas    = sum(1 for r in reqs if r.get("SITUAÇÃO") == "Anulado")
+    val_emp       = sum(parse(r.get("VALOR", 0)) for r in reqs if r.get("SITUAÇÃO") == "Empenhada")
 
-    b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
-    with b1:
-        if st.button("➕ Nova REQ", type="primary", use_container_width=True):
-            st.session_state["form_req"] = not st.session_state.get("form_req", False)
-    with b2:
-        st.markdown(
-            f'<a href="{LINK_SHEETS}" target="_blank">'
-            f'<button style="background:transparent;color:#64748b;border:1px solid #1a2540;'
-            f'border-radius:6px;padding:6px 12px;font-size:.85rem;cursor:pointer;width:100%;">'
-            f'📊 Planilha</button></a>',
-            unsafe_allow_html=True,
-        )
-    with b3:
-        if st.button("🔄 Recalcular NCs", use_container_width=True,
-                     help="Soma todas as REQs Empenhadas e atualiza EMPENHADO nas NCs"):
-            with st.spinner("Recalculando..."):
-                try:
-                    from sheets_nc import recalcular_empenhados
-                    resultado = recalcular_empenhados(reqs)
-                    carregar(forcar=True)
-                    if resultado:
-                        for nc, msg in resultado.items():
-                            st.write(f"**{nc}**: {msg}")
-                    else:
-                        st.info("Nenhuma REQ empenhada encontrada.")
-                except Exception as e:
-                    st.error(f"Erro: {e}")
-    with b4:
-        total = sum(parse(r.get("VALOR", 0)) for r in filtradas)
-        st.info(f"📝 **{len(filtradas)}** REQs · Total: **{fmt(total)}**")
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("📋 Total REQs",   len(reqs))
+    k2.metric("💰 Valor Total",  fmt(total_geral))
+    k3.metric("⏳ Pendentes",    n_pendentes)
+    k4.metric("🟢 Empenhadas",   n_empenhadas,  delta=fmt(val_emp), delta_color="off")
+    k5.metric("🔴 Anuladas",     n_anuladas)
+
+    st.divider()
+
+    # ── Filtros rápidos ────────────────────────────────────────────────
+    fc1, fc2 = st.columns([3, 2])
+    busca = fc1.text_input("Busca", placeholder="🔍 REQ, NC, Empresa, NE...",
+                           key="req_busca", label_visibility="collapsed")
+    status_opt = fc2.radio("Status", ["Todos", "🟡 Pendente", "🟢 Empenhada", "🔴 Anulado"],
+                           horizontal=True, key="req_status", label_visibility="collapsed")
+
+    with st.expander("🔧 Filtros avançados"):
+        fa1, fa2, fa3, fa4 = st.columns(4)
+        f_emp  = fa1.multiselect("Empresa", sorted({r.get("EMPRESA", "") for r in reqs if r.get("EMPRESA")}))
+        f_nc   = fa2.multiselect("NC",      sorted({r.get("NC", "")      for r in reqs if r.get("NC")}))
+        f_tipo = fa3.multiselect("Tipo",    ["Ordinário", "Especial", "Anulação"])
+        f_pi   = fa4.multiselect("PI",      sorted({r.get("PI", "")      for r in reqs if r.get("PI")}))
+
+    # ── Aplicar filtros ────────────────────────────────────────────────
+    filtradas = []
+    for r in reqs:
+        sit = r.get("SITUAÇÃO", "")
+        if status_opt == "🟡 Pendente"  and sit != "Pendente":  continue
+        if status_opt == "🟢 Empenhada" and sit != "Empenhada": continue
+        if status_opt == "🔴 Anulado"   and sit != "Anulado":   continue
+        if f_emp  and r.get("EMPRESA") not in f_emp:  continue
+        if f_nc   and r.get("NC")      not in f_nc:   continue
+        if f_tipo and r.get("TIPO")    not in f_tipo: continue
+        if f_pi   and r.get("PI")      not in f_pi:   continue
+        if busca:
+            hay = " ".join(str(v) for v in r.values()).lower()
+            if busca.lower() not in hay: continue
+        filtradas.append(r)
+
+    # ── Barra de ações ─────────────────────────────────────────────────
+    ac1, ac2, ac3, ac4 = st.columns([1, 1, 1, 3])
+    if ac1.button("➕ Nova REQ", type="primary", use_container_width=True):
+        st.session_state["form_req"] = not st.session_state.get("form_req", False)
+    ac2.markdown(
+        f'<a href="{LINK_SHEETS}" target="_blank">'
+        f'<button style="background:transparent;color:#64748b;border:1px solid #334155;'
+        f'border-radius:6px;padding:8px 12px;font-size:.85rem;cursor:pointer;width:100%;">'
+        f'📊 Planilha</button></a>', unsafe_allow_html=True)
+    if ac3.button("🔄 Recalcular NCs", use_container_width=True,
+                  help="Atualiza EMPENHADO nas NCs com base nas REQs"):
+        with st.spinner("Recalculando..."):
+            try:
+                from sheets_nc import recalcular_empenhados
+                resultado = recalcular_empenhados(reqs)
+                carregar(forcar=True)
+                msgs = [f"**{nc}**: {msg}" for nc, msg in resultado.items()]
+                st.success("✅ " + " | ".join(msgs) if msgs else "Nenhuma REQ empenhada.")
+            except Exception as e:
+                st.error(f"Erro: {e}")
+
+    total_f = sum(parse(r.get("VALOR", 0)) for r in filtradas)
+    ac4.info(f"**{len(filtradas)}** de {len(reqs)} REQs · Total filtrado: **{fmt(total_f)}**")
 
     if st.session_state.get("form_req"):
         _form_req(ncs)
 
     if not filtradas:
-        st.info("Nenhuma REQ encontrada.")
+        st.info("Nenhuma REQ encontrada com os filtros aplicados.")
         return
 
-    # KPIs rápidos
-    k1, k2, k3 = st.columns(3)
-    total_val  = sum(parse(r.get("VALOR", 0)) for r in filtradas)
-    pendentes  = sum(1 for r in filtradas if r.get("SITUAÇÃO") == "Pendente")
-    empenhadas = sum(1 for r in filtradas if r.get("SITUAÇÃO") == "Empenhada")
-    k1.metric("💰 Total",      fmt(total_val))
-    k2.metric("⏳ Pendentes",  pendentes)
-    k3.metric("📌 Empenhadas", empenhadas)
-
-    def _badge_req(sit):
-        return {"Pendente": "🟡", "Enviada": "🔵", "Aprovada": "🟠",
-                "Empenhada": "🟢", "Liquidada": "🟣", "Paga": "⚪"}.get(sit, "⚪")
-
-    todas_cols = {k for r in filtradas for k in r.keys()}
+    # ── Tabela ────────────────────────────────────────────────────────
     rows = []
     for r in filtradas:
         valor_num = parse(r.get("VALOR", 0))
