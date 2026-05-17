@@ -1126,7 +1126,22 @@ def page_reqs(reqs, ncs):
 
 def _form_req(ncs):
     st.divider()
-    st.subheader("➕ Nova Requisição")
+
+    # ── Seleção do tipo de requisição (fora do form para reatividade)
+    tipo_req = st.radio(
+        "Tipo de Requisição",
+        ["📋 Requisição de Empenho", "🔴 Requisição de Anulação"],
+        horizontal=True,
+        key="_frq_tipo_radio",
+        label_visibility="collapsed",
+    )
+    eh_anulacao = tipo_req == "🔴 Requisição de Anulação"
+
+    if eh_anulacao:
+        st.error("⚠️ **Requisição de Anulação** — ao emitir esta requisição o saldo da NC será **devolvido/aumentado**.")
+        st.subheader("🔴 Nova Requisição de Anulação")
+    else:
+        st.subheader("📋 Nova Requisição de Empenho")
 
     # NC fora do form → PI preenche reativamente
     nums_nc = [""] + [nc.get("NC", "") for nc in ncs if nc.get("NC")]
@@ -1144,9 +1159,11 @@ def _form_req(ncs):
         entrada_salc = c1.date_input("Entrada na SALC", value=None)
 
         pi       = c2.text_input("PI", value=nc_d.get("PI", ""))
-        tipo     = c2.selectbox("Tipo", ["Ordinário", "Especial", "Anulação"])
+        tipo     = c2.selectbox("Tipo",
+                                ["Anulação"] if eh_anulacao else ["Ordinário", "Especial"])
         ne       = c2.text_input("NE")
-        situacao = c2.selectbox("Situação", SITUACOES_REQ)
+        sit_opts = ["Anulado"] + [s for s in SITUACOES_REQ if s != "Anulado"] if eh_anulacao else SITUACOES_REQ
+        situacao = c2.selectbox("Situação", sit_opts)
 
         finalidade = st.text_area("Finalidade", value=nc_d.get("FINALIDADE", ""))
         descricao  = st.text_area("Descrição *")
