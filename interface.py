@@ -984,6 +984,52 @@ def page_reqs(reqs, ncs):
     if st.session_state.get("form_req"):
         _form_req(ncs)
 
+    # ── Consulta de saldo por NC ──────────────────────────────────────
+    st.divider()
+    with st.expander("🔎 Consultar saldo de uma NC", expanded=False):
+        ncs_disponiveis = sorted({r.get("NC", "") for r in reqs if r.get("NC")})
+        nc_consulta = st.selectbox("Selecione a NC", [""] + ncs_disponiveis,
+                                   key="req_nc_consulta", label_visibility="collapsed",
+                                   placeholder="Escolha uma NC...")
+        if nc_consulta:
+            nc_d = next((n for n in ncs if n.get("NC") == nc_consulta), {})
+            recebido = parse(nc_d.get("RECEBIDO", 0))
+
+            # Soma de TODAS as REQs da NC (exceto anuladas)
+            reqs_nc = [r for r in reqs
+                       if r.get("NC") == nc_consulta
+                       and r.get("SITUAÇÃO") not in ("Anulado",)]
+            total_reqs  = sum(parse(r.get("VALOR", 0)) for r in reqs_nc)
+            saldo_disp  = max(0.0, recebido - total_reqs)
+
+            # Por situação
+            val_pend = sum(parse(r.get("VALOR", 0)) for r in reqs_nc if r.get("SITUAÇÃO") == "Pendente")
+            val_emp  = sum(parse(r.get("VALOR", 0)) for r in reqs_nc if r.get("SITUAÇÃO") == "Empenhada")
+            val_out  = total_reqs - val_pend - val_emp
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("💰 Recebido",      fmt(recebido))
+            c2.metric("📋 Total REQs",    fmt(total_reqs),
+                      delta=f"{len(reqs_nc)} req(s)", delta_color="off")
+            c3.metric("🟢 Saldo disponível", fmt(saldo_disp),
+                      delta="OK" if saldo_disp >= 0 else "⚠️ Excede",
+                      delta_color="normal" if saldo_disp >= 0 else "inverse")
+            c4.metric("⏳ Pendentes",     fmt(val_pend))
+
+            if recebido > 0:
+                pct_usado = min(100.0, total_reqs / recebido * 100)
+                st.progress(pct_usado / 100,
+                            text=f"{pct_usado:.1f}% comprometido — {fmt(total_reqs)} de {fmt(recebido)}")
+
+            if reqs_nc:
+                df_nc = pd.DataFrame([{
+                    "REQ":      r.get("REQ", ""),
+                    "Empresa":  r.get("EMPRESA", ""),
+                    "Valor":    fmt(parse(r.get("VALOR", 0))),
+                    "Situação": r.get("SITUAÇÃO", ""),
+                } for r in reqs_nc])
+                st.dataframe(df_nc, use_container_width=True, hide_index=True)
+
     if not filtradas:
         st.info("Nenhuma REQ encontrada com os filtros aplicados.")
         return
