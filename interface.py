@@ -676,9 +676,24 @@ def page_dashboard(ncs, reqs):
 
 
 # ── NCs ───────────────────────────────────────────────────────────────────────
-def page_ncs(ncs):
+def page_ncs(ncs, reqs=None):
     st.title("📋 Notas de Crédito")
     hoje = date.today()
+    reqs = reqs or []
+
+    # Calcula empenhado por NC a partir das requisições (fonte de verdade)
+    from collections import defaultdict
+    emp_por_nc: dict[str, float] = defaultdict(float)
+    for r in reqs:
+        nc_r  = r.get("NC", "")
+        val_r = parse(r.get("VALOR", 0))
+        sit_r = r.get("SITUAÇÃO", "")
+        if sit_r == "Empenhada" and nc_r:
+            emp_por_nc[nc_r] += val_r
+        elif sit_r == "Anulado" and nc_r:
+            emp_por_nc[nc_r] -= val_r
+    # Garante não negativo
+    emp_por_nc = {k: max(0.0, v) for k, v in emp_por_nc.items()}
 
     def _dias_prazo(nc):
         try:
@@ -771,23 +786,63 @@ def page_ncs(ncs):
         st.info("Nenhuma NC encontrada com os filtros aplicados.")
         return
 
+    # ── Tabela resumo de saldo (calculado a partir das REQs) ──────────
+    st.subheader("💰 Saldo por NC")
+    resumo_rows = []
+    for nc in filtradas:
+        nc_num   = nc.get("NC", "")
+        recebido = parse(nc.get("RECEBIDO", 0))
+        empenhado = emp_por_nc.get(nc_num, 0.0)
+        saldo    = max(0.0, recebido - empenhado)
+        pct      = round(empenhado / recebido * 100, 1) if recebido else 0.0
+        resumo_rows.append({
+            "NC":         nc_num,
+            "ORGÃO":      nc.get("ORGÃO", ""),
+            "RECEBIDO":   fmt(recebido),
+            "EMPENHADO":  fmt(empenhado),
+            "SALDO":      fmt(saldo),
+            "EMP %":      pct,
+        })
+    df_resumo = pd.DataFrame(resumo_rows)
+    st.dataframe(
+        df_resumo,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "NC":        st.column_config.TextColumn("NC",        width=130),
+            "ORGÃO":     st.column_config.TextColumn("Órgão",     width=110),
+            "RECEBIDO":  st.column_config.TextColumn("Recebido",  width=130),
+            "EMPENHADO": st.column_config.TextColumn("Empenhado", width=130),
+            "SALDO":     st.column_config.TextColumn("Saldo",     width=130),
+            "EMP %":     st.column_config.ProgressColumn("Emp %",
+                             format="%.1f%%", min_value=0, max_value=100, width=90),
+        },
+    )
+    st.divider()
+    st.subheader("📋 Detalhes das NCs")
+
     # ── Tabela enriquecida ─────────────────────────────────────────────
     rows = []
     for nc in filtradas:
-        d = _dias_prazo(nc)
+        d         = _dias_prazo(nc)
+        nc_num    = nc.get("NC", "")
+        recebido  = parse(nc.get("RECEBIDO", 0))
+        empenhado = emp_por_nc.get(nc_num, 0.0)
+        saldo     = max(0.0, recebido - empenhado)
+        pct_emp   = round(empenhado / recebido * 100, 1) if recebido else 0.0
         rows.append({
             "":           _badge(nc),
-            "NC":         nc.get("NC", ""),
+            "NC":         nc_num,
             "ORGÃO":      nc.get("ORGÃO", ""),
             "OP":         nc.get("OP", ""),
             "FINALIDADE": nc.get("FINALIDADE", ""),
             "DATA NC":    nc.get("DATA NC", ""),
             "PRAZO":      nc.get("PRAZO", ""),
             "RESTAM":     d if d is not None else 9999,
-            "RECEBIDO":   fmt(parse(nc.get("RECEBIDO", 0))),
-            "SALDO NC":   fmt(parse(nc.get("SALDO NC",  0))),
-            "EMP %":      _parse_pct(nc.get("EMP %", "0")),
-            "EM TELA %":  max(0.0, 100.0 - _parse_pct(nc.get("EMP %", "0"))),
+            "RECEBIDO":   fmt(recebido),
+            "SALDO NC":   fmt(saldo),
+            "EMP %":      pct_emp,
+            "EM TELA %":  max(0.0, 100.0 - pct_emp),
             "SITUAÇÃO":   nc.get("SITUAÇÃO", ""),
         })
 
@@ -1999,7 +2054,7 @@ def main():
     pagina = _sidebar(ncs, reqs)
 
     if   pagina == "dashboard":  page_dashboard(ncs, reqs)
-    elif pagina == "ncs":        page_ncs(ncs)
+    elif pagina == "ncs":        page_ncs(ncs, reqs)
     elif pagina == "reqs":       page_reqs(reqs, ncs)
     elif pagina == "pdf":        page_pdf(ncs)
     elif pagina == "gerar_req":  page_gerar_req(reqs, ncs)
