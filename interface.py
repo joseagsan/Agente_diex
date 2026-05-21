@@ -52,13 +52,25 @@ _LIGHT = dict(
 
 
 def _t() -> dict:
-    return _LIGHT  # tema claro fixo (definido em config.toml)
+    return _DARK if st.session_state.get("tema_escuro") else _LIGHT
 
 
 def _inject_css():
-    t = _t()
+    t   = _t()
+    esc = st.session_state.get("tema_escuro", False)
+    dark_override = """
+[data-testid="stAppViewContainer"],[data-testid="stMain"]{background-color:#0d1117!important}
+[data-testid="stHeader"]{background:#0d1117!important}
+.block-container,[data-testid="stVerticalBlockBorderWrapper"]{background-color:#0d1117!important}
+p,label,h1,h2,h3,h4,span,[data-testid="stMarkdownContainer"]{color:#e6edf3!important}
+[data-testid="stMetricValue"],[data-testid="stMetricLabel"],[data-testid="stMetricDelta"]{color:#e6edf3!important}
+[data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,[data-testid="stTextArea"] textarea{background:#161b22!important;color:#e6edf3!important;border-color:#30363d!important}
+[data-baseweb="select"] div,[data-baseweb="popover"] ul{background:#161b22!important;color:#e6edf3!important}
+[data-testid="stDataFrameResizable"]{background:#0d1117!important}
+""" if esc else ""
     st.markdown(f"""
 <style>
+{dark_override}
 #MainMenu, footer {{visibility:hidden;}}
 .block-container {{padding:1.5rem 2rem 3rem !important; max-width:100% !important;}}
 
@@ -435,6 +447,12 @@ def _sidebar(ncs, reqs) -> str:
         with c2:
             if st.button("🚪 Sair", use_container_width=True):
                 logout()
+
+        # Tema
+        escuro = st.toggle("🌙 Modo escuro", value=st.session_state.get("tema_escuro", False))
+        if escuro != st.session_state.get("tema_escuro", False):
+            st.session_state["tema_escuro"] = escuro
+            st.rerun()
 
         # Link planilha
         st.markdown(
