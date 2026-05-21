@@ -30,37 +30,28 @@ COLUNAS_REQ = [
 ]
 
 
-def _conectar() -> gspread.Client:
+def _get_credenciais() -> Credentials:
+    """Retorna credenciais Google (service account) — usada por Sheets e Drive."""
     import os, json
 
-    # 1. Streamlit Cloud: secret [gcp_service_account]
     try:
         import streamlit as st
         if "gcp_service_account" in st.secrets:
-            logger.info("GCP via st.secrets")
-            creds = Credentials.from_service_account_info(
+            return Credentials.from_service_account_info(
                 dict(st.secrets["gcp_service_account"]), scopes=SCOPES
             )
-            return gspread.authorize(creds)
     except Exception:
         pass
 
-    # 2. Variável GCP_CREDENTIALS_JSON (JSON completo)
     raw = os.getenv("GCP_CREDENTIALS_JSON", "").strip()
-    logger.info("GCP_CREDENTIALS_JSON: %d chars", len(raw))
     if raw:
         try:
-            info = json.loads(raw)
-            creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-            logger.info("GCP autenticado via GCP_CREDENTIALS_JSON")
-            return gspread.authorize(creds)
+            return Credentials.from_service_account_info(json.loads(raw), scopes=SCOPES)
         except Exception as e:
             logger.error("Erro GCP_CREDENTIALS_JSON: %s", e)
 
-    # 3. Campos individuais (private_key, client_email, ...)
     pk = os.getenv("private_key", "").strip()
     ce = os.getenv("client_email", "").strip()
-    logger.info("Campos individuais: pk=%s ce=%s", bool(pk), bool(ce))
     if pk and ce:
         try:
             info = {
@@ -75,15 +66,16 @@ def _conectar() -> gspread.Client:
                 "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
                 "client_x509_cert_url":        os.getenv("client_x509_cert_url", ""),
             }
-            creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-            logger.info("GCP autenticado via campos individuais")
-            return gspread.authorize(creds)
+            return Credentials.from_service_account_info(info, scopes=SCOPES)
         except Exception as e:
             logger.error("Erro campos individuais: %s", e)
 
-    # 4. Arquivo JSON local
-    logger.warning("GCP: fallback para arquivo %s", GOOGLE_CREDENTIALS_FILE)
-    creds = Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE, scopes=SCOPES)
+    return Credentials.from_service_account_file(GOOGLE_CREDENTIALS_FILE, scopes=SCOPES)
+
+
+def _conectar() -> gspread.Client:
+    creds = _get_credenciais()
+    logger.info("GCP autenticado")
     return gspread.authorize(creds)
 
 
@@ -575,8 +567,7 @@ _DRIVE_SHARE_EMAILS = ["sac10gacsl@gmail.com", "augustumourasantos@gmail.com"]
 def _get_drive_service():
     """Retorna cliente Drive usando as mesmas credenciais do Sheets."""
     from googleapiclient.discovery import build
-    client = _conectar()
-    return build("drive", "v3", credentials=client.auth)
+    return build("drive", "v3", credentials=_get_credenciais())
 
 
 def _compartilhar(service, file_id: str) -> None:
