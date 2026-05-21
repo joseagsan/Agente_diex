@@ -565,3 +565,63 @@ def excluir_frase(tipo: str, texto: str) -> None:
                 return
     except Exception as e:
         logger.warning("Erro ao excluir frase: %s", e)
+
+
+# ── Google Drive ───────────────────────────────────────────────────────────────
+_DRIVE_FOLDER_NAME = "SSAC - Requisições"
+
+
+def _get_drive_service():
+    """Retorna cliente Drive usando as mesmas credenciais do Sheets."""
+    from googleapiclient.discovery import build
+    client = _conectar()
+    return build("drive", "v3", credentials=client.auth)
+
+
+def _get_ou_criar_pasta(service) -> str:
+    """Retorna o ID da pasta 'SSAC - Requisições' no Drive, criando se não existir."""
+    q = f"name='{_DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    res = service.files().list(q=q, fields="files(id,name)").execute()
+    arquivos = res.get("files", [])
+    if arquivos:
+        return arquivos[0]["id"]
+    meta = {"name": _DRIVE_FOLDER_NAME, "mimeType": "application/vnd.google-apps.folder"}
+    pasta = service.files().create(body=meta, fields="id").execute()
+    logger.info("Pasta Drive criada: %s", _DRIVE_FOLDER_NAME)
+    return pasta["id"]
+
+
+def salvar_req_no_drive(html_content: str, req_num: str) -> str:
+    """
+    Salva o HTML da REQ no Google Drive e retorna o link de visualização.
+    Cria a pasta 'SSAC - Requisições' se não existir.
+    """
+    from googleapiclient.http import MediaInMemoryUpload
+    try:
+        service   = _get_drive_service()
+        folder_id = _get_ou_criar_pasta(service)
+        nome      = f"REQ_{req_num}.html"
+
+        # Remove versão anterior se existir
+        q = f"name='{nome}' and '{folder_id}' in parents and trashed=false"
+        antigos = service.files().list(q=q, fields="files(id)").execute().get("files", [])
+        for arq in antigos:
+            service.files().delete(fileId=arq["id"]).execute()
+
+        # Cria o arquivo
+        meta  = {"name": nome, "parents": [folder_id], "mimeType": "text/html"}
+        media = MediaInMemoryUpload(html_content.encode("utf-8"), mimetype="text/html")
+        arq   = service.files().create(body=meta, media_body=media, fields="id").execute()
+
+        # Torna acessível por link
+        service.permissions().create(
+            fileId=arq["id"],
+            body={"type": "anyone", "role": "reader"},
+        ).execute()
+
+        link = f"https://drive.google.com/file/d/{arq['id']}/view"
+        logger.info("REQ %s salva no Drive: %s", req_num, link)
+        return link
+    except Exception as e:
+        logger.error("Erro ao salvar no Drive: %s", e)
+        raise
