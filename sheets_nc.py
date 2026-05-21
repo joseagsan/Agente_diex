@@ -8,7 +8,7 @@ from typing import Optional
 import gspread
 from google.oauth2.service_account import Credentials
 
-from config import SHEET_ID_NC, GOOGLE_CREDENTIALS_FILE, ABA_NCS, ABA_REQS, ABA_FORNECEDORES
+from config import SHEET_ID_NC, GOOGLE_CREDENTIALS_FILE, ABA_NCS, ABA_REQS, ABA_FORNECEDORES, DRIVE_FOLDER_ID
 
 logger = logging.getLogger(__name__)
 
@@ -594,17 +594,19 @@ def _compartilhar(service, file_id: str) -> None:
 
 
 def _get_ou_criar_pasta(service) -> str:
-    """Retorna o ID da pasta 'SSAC - Requisições', criando e compartilhando se necessário."""
-    q = f"name='{_DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    res = service.files().list(q=q, fields="files(id,name)").execute()
-    arquivos = res.get("files", [])
-    if arquivos:
-        return arquivos[0]["id"]
-    meta  = {"name": _DRIVE_FOLDER_NAME, "mimeType": "application/vnd.google-apps.folder"}
-    pasta = service.files().create(body=meta, fields="id").execute()
-    _compartilhar(service, pasta["id"])
-    logger.info("Pasta Drive criada e compartilhada: %s", _DRIVE_FOLDER_NAME)
-    return pasta["id"]
+    """
+    Retorna o ID da pasta no Drive onde salvar as REQs.
+    Usa DRIVE_FOLDER_ID da config se definido (pasta no Drive do usuário).
+    Caso contrário, tenta criar — mas service accounts precisam de pasta do usuário.
+    """
+    if DRIVE_FOLDER_ID:
+        logger.info("Usando pasta Drive configurada: %s", DRIVE_FOLDER_ID)
+        return DRIVE_FOLDER_ID
+    raise ValueError(
+        "Configure DRIVE_FOLDER_ID no Railway: crie uma pasta no seu Google Drive, "
+        f"compartilhe com agentes@absolute-disk-428101-n6.iam.gserviceaccount.com (Editor) "
+        "e cole o ID da pasta na variável DRIVE_FOLDER_ID."
+    )
 
 
 def salvar_req_no_drive(html_content: str, req_num: str) -> str:
