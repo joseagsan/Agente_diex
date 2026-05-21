@@ -39,15 +39,15 @@ _DARK = dict(
     bar_recv="#3b82f6", bar_emp="#10b981", bar_saldo="#34d399",
 )
 _LIGHT = dict(
-    bg="transparent", card_bg="#ffffff", card_border="#e2e8f0",
-    text="#0f172a", subtext="#64748b", accent="#059669",
-    sidebar_bg="#1e293b", sidebar_border="#334155",
-    nav_color="#94a3b8", nav_hover_bg="#273549", nav_hover_color="#f1f5f9",
-    active_bg="linear-gradient(135deg,#065f46,#047857)", active_border="#06996060",
+    bg="transparent", card_bg="#ffffff", card_border="#e4e9f0",
+    text="#111827", subtext="#6b7280", accent="#2d8a4e",
+    sidebar_bg="#1a2e1e", sidebar_border="#2d4a32",
+    nav_color="#86a98c", nav_hover_bg="#243529", nav_hover_color="#d1fae5",
+    active_bg="linear-gradient(90deg,#1a6e35,#2d8a4e)", active_border="#2d8a4e60",
     active_color="#d1fae5",
     plot_bg="rgba(255,255,255,0)", paper_bg="rgba(255,255,255,0)",
-    grid="#e2e8f0", font_color="#374151",
-    bar_recv="#2563eb", bar_emp="#059669", bar_saldo="#0d9488",
+    grid="#e4e9f0", font_color="#374151",
+    bar_recv="#2563eb", bar_emp="#2d8a4e", bar_saldo="#0d9488",
 )
 
 
@@ -70,10 +70,27 @@ p,label,h1,h2,h3,h4,span,[data-testid="stMarkdownContainer"]{color:#e6edf3!impor
 """ if esc else ""
     st.markdown(f"""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 {dark_override}
+
+:root {{
+  --green:      #2d8a4e;
+  --green-l:    #3aab63;
+  --green-pale: #f0faf4;
+  --card-bg:    {t['card_bg']};
+  --card-br:    {t['card_border']};
+  --text-1:     {t['text']};
+  --text-3:     {t['subtext']};
+  --shadow-sm:  0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+  --shadow-md:  0 4px 14px rgba(0,0,0,.08),0 2px 4px rgba(0,0,0,.04);
+  --r:          10px;
+}}
+
+* {{ font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important; }}
 #MainMenu, footer {{visibility:hidden;}}
 .block-container {{padding:1.5rem 2rem 3rem !important; max-width:100% !important;}}
 
+/* ── Sidebar ── */
 section[data-testid="stSidebar"] {{width:230px !important; min-width:230px !important;}}
 section[data-testid="stSidebar"] > div:first-child {{
     background:{t['sidebar_bg']} !important;
@@ -82,8 +99,9 @@ section[data-testid="stSidebar"] > div:first-child {{
 section[data-testid="stSidebar"] [data-testid="baseButton-secondary"] {{
     text-align:left !important; justify-content:flex-start !important;
     background:transparent !important; border:none !important;
-    color:{t['nav_color']} !important; font-size:.875rem !important; font-weight:500 !important;
+    color:{t['nav_color']} !important; font-size:.84rem !important; font-weight:500 !important;
     padding:9px 12px !important; border-radius:8px !important; margin:1px 0 !important;
+    letter-spacing:.1px !important;
 }}
 section[data-testid="stSidebar"] [data-testid="baseButton-secondary"]:hover {{
     background:{t['nav_hover_bg']} !important; color:{t['nav_hover_color']} !important;
@@ -91,28 +109,83 @@ section[data-testid="stSidebar"] [data-testid="baseButton-secondary"]:hover {{
 section[data-testid="stSidebar"] [data-testid="baseButton-primary"] {{
     text-align:left !important; justify-content:flex-start !important;
     background:{t['active_bg']} !important; border:1px solid {t['active_border']} !important;
-    color:{t['active_color']} !important; font-size:.875rem !important; font-weight:600 !important;
+    color:{t['active_color']} !important; font-size:.84rem !important; font-weight:700 !important;
     padding:9px 12px !important; border-radius:8px !important; margin:1px 0 !important;
 }}
-section[data-testid="stSidebar"] [data-testid="baseButton-primary"]:hover {{
-    filter:brightness(1.1);
-}}
+section[data-testid="stSidebar"] [data-testid="baseButton-primary"]:hover {{ filter:brightness(1.1); }}
 section[data-testid="stSidebar"] hr {{border-color:{t['sidebar_border']} !important; margin:8px 0 !important;}}
 
-[data-testid="stDataFrame"] {{border:1px solid {t['card_border']} !important; border-radius:10px !important;}}
-[data-testid="stForm"] {{background:{t['card_bg']} !important; border:1px solid {t['card_border']} !important; border-radius:12px;}}
-[data-testid="stExpander"] {{border:1px solid {t['card_border']} !important; border-radius:10px !important;}}
+/* ── Cards / Forms / Expanders ── */
+[data-testid="stDataFrame"] {{
+    border:1px solid var(--card-br) !important; border-radius:var(--r) !important;
+    box-shadow:var(--shadow-sm) !important;
+}}
+[data-testid="stForm"] {{
+    background:var(--card-bg) !important; border:1px solid var(--card-br) !important;
+    border-radius:var(--r) !important; box-shadow:var(--shadow-sm) !important;
+    border-top:3px solid var(--green) !important;
+}}
+[data-testid="stExpander"] {{
+    border:1px solid var(--card-br) !important; border-radius:var(--r) !important;
+    box-shadow:var(--shadow-sm) !important;
+}}
 hr {{border-color:{t['card_border']} !important;}}
 
-/* KPI cards */
-.kpi-card {{
-    background:{t['card_bg']}; border:1px solid {t['card_border']};
-    border-radius:12px; padding:16px 20px; position:relative; overflow:hidden;
+/* ── Metric cards ── */
+[data-testid="stMetric"] {{
+    background:var(--card-bg);
+    border:1px solid var(--card-br);
+    border-top:3px solid var(--green);
+    border-radius:var(--r);
+    padding:14px 18px !important;
+    box-shadow:var(--shadow-sm);
 }}
-.kpi-card .kpi-label {{font-size:.75rem; color:{t['subtext']}; text-transform:uppercase; letter-spacing:.8px; margin-bottom:6px;}}
-.kpi-card .kpi-value {{font-size:1.45rem; font-weight:800; color:{t['text']};}}
-.kpi-card .kpi-delta {{font-size:.75rem; color:{t['subtext']}; margin-top:4px;}}
-.kpi-card .kpi-stripe {{position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:12px 0 0 12px;}}
+[data-testid="stMetricValue"] {{
+    font-size:1.4rem !important; font-weight:800 !important; color:var(--text-1) !important;
+}}
+[data-testid="stMetricLabel"] {{
+    font-size:.72rem !important; font-weight:600 !important;
+    text-transform:uppercase !important; letter-spacing:.6px !important;
+    color:var(--text-3) !important;
+}}
+
+/* ── KPI cards (custom HTML) ── */
+.kpi-card {{
+    background:var(--card-bg); border:1px solid var(--card-br);
+    border-top:3px solid var(--green);
+    border-radius:var(--r); padding:16px 20px;
+    position:relative; overflow:hidden;
+    box-shadow:var(--shadow-sm);
+    transition:box-shadow .2s;
+}}
+.kpi-card:hover {{ box-shadow:var(--shadow-md); }}
+.kpi-card .kpi-label {{
+    font-size:.68rem; color:var(--text-3); text-transform:uppercase;
+    letter-spacing:.7px; margin-bottom:5px; font-weight:600;
+}}
+.kpi-card .kpi-value {{
+    font-size:1.4rem; font-weight:800; color:var(--text-1);
+}}
+.kpi-card .kpi-delta {{
+    font-size:.72rem; color:var(--text-3); margin-top:3px;
+}}
+.kpi-card .kpi-stripe {{
+    position:absolute; left:0; top:0; bottom:0; width:4px;
+    border-radius:var(--r) 0 0 var(--r);
+}}
+
+/* ── Buttons ── */
+[data-testid="baseButton-primary"] {{
+    background:linear-gradient(90deg,#1a6e35,#2d8a4e) !important;
+    border:none !important; border-radius:8px !important;
+    font-weight:600 !important; letter-spacing:.2px !important;
+    box-shadow:0 2px 6px rgba(45,138,78,.35) !important;
+}}
+[data-testid="baseButton-primary"]:hover {{
+    filter:brightness(1.08) !important;
+    box-shadow:0 4px 12px rgba(45,138,78,.45) !important;
+}}
+</style>
 """, unsafe_allow_html=True)
 
 
