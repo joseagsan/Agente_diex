@@ -74,6 +74,14 @@ p,label,h1,h2,h3,h4,span,[data-testid="stMarkdownContainer"]{color:#e6edf3!impor
 #MainMenu, footer {{visibility:hidden;}}
 .block-container {{padding:1.5rem 2rem 3rem !important; max-width:100% !important;}}
 
+/* Expande conteúdo quando sidebar está recolhida */
+section[data-testid="stSidebar"][aria-expanded="false"] ~ div[data-testid="stMain"],
+section[data-testid="stSidebar"][aria-expanded="false"] ~ section[data-testid="stMain"] {{
+    margin-left:0 !important;
+    width:100% !important;
+}}
+section[data-testid="stSidebar"] {{ transition: width .3s ease !important; }}
+
 /* ── Sidebar ── */
 section[data-testid="stSidebar"] {{width:230px !important; min-width:230px !important;}}
 section[data-testid="stSidebar"] > div:first-child {{
@@ -1866,12 +1874,18 @@ def page_gerar_req(reqs, ncs):
                     itens = itens_cache[forn_id]
                     st.caption(f"{len(itens)} item(ns)")
                     for gidx, item in enumerate(itens):
-                        num = item.get("numero", "")
-                        ja  = num in itens_ja_adicionados
+                        num   = item.get("numero", "")
+                        ja    = num in itens_ja_adicionados
+                        saldo = item.get("qtd_saldo", "")
+                        v     = item.get("valor_unit", 0.0)
                         ca, cb, cc = st.columns([1, 8, 2])
                         ca.markdown(f"**{num}**")
-                        v   = item.get("valor_unit", 0.0)
-                        cb.markdown(f"{item.get('descricao','')[:80]} — **{fmt(v)}**")
+                        cb.markdown(
+                            f"{item.get('descricao','')[:80]}"
+                            f"&nbsp;&nbsp;<span style='color:#449D44;font-weight:700'>{fmt(v)}</span>"
+                            f"&nbsp;&nbsp;<span style='color:#888;font-size:.85em'>Saldo: {saldo}</span>",
+                            unsafe_allow_html=True,
+                        )
                         if ja:
                             cc.markdown("✓")
                         elif cc.button("➕", key=f"add_{forn_id}_{gidx}"):
@@ -1989,10 +2003,12 @@ def page_gerar_req(reqs, ncs):
 
     if st.session_state.req_itens:
         df_it = pd.DataFrame(st.session_state.req_itens)
+        df_it.insert(0, "🗑️", False)
         edited = st.data_editor(
-            df_it[["ORD", "ITEM", "SI", "DESCRICAO_ITEM", "UND", "QTD", "VALOR_UNIT", "VALOR_TOTAL"]],
+            df_it[["🗑️", "ORD", "ITEM", "SI", "DESCRICAO_ITEM", "UND", "QTD", "VALOR_UNIT", "VALOR_TOTAL"]],
             use_container_width=True, hide_index=True,
             column_config={
+                "🗑️":           st.column_config.CheckboxColumn("", width=35),
                 "ORD":           st.column_config.TextColumn("Ord", disabled=True, width="small"),
                 "ITEM":          st.column_config.TextColumn("Item", disabled=True, width="small"),
                 "SI":            st.column_config.TextColumn("SI", width="small"),
@@ -2004,6 +2020,20 @@ def page_gerar_req(reqs, ncs):
             },
             key="editor_itens",
         )
+
+        # Apagar selecionados
+        selecionados = [i for i, row in edited.iterrows() if row.get("🗑️")]
+        if selecionados:
+            if st.button(f"🗑️ Apagar {len(selecionados)} item(ns) selecionado(s)",
+                         type="primary", key="btn_apagar_sel"):
+                st.session_state.req_itens = [
+                    it for i, it in enumerate(st.session_state.req_itens)
+                    if i not in selecionados
+                ]
+                # Renumera ORD
+                for i, it in enumerate(st.session_state.req_itens):
+                    it["ORD"] = str(i + 1)
+                st.rerun()
         # Aplica edições de SI e QTD — detecta mudança e recalcula total
         changed = False
         for i, row in edited.iterrows():
