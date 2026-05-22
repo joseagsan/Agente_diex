@@ -2139,48 +2139,57 @@ def page_gerar_req(reqs, ncs):
             use_container_width=True,
         )
 
+        # Gera HTML sempre que o doc está pronto
+        if not st.session_state.get("_doc_html_bytes"):
+            try:
+                from gerador_req_html import gerar_html_req
+                cf        = st.session_state.get("_doc_campos", {})
+                itens_lim = st.session_state.get("_doc_itens_limpos", [])
+                html      = gerar_html_req(cf, itens_lim)
+                st.session_state["_doc_html_bytes"] = html.encode("utf-8")
+            except Exception:
+                pass
+
+        if st.session_state.get("_doc_html_bytes"):
+            nome_html = st.session_state.get("_doc_nome", "REQ.docx").replace(".docx", ".html")
+            st.download_button(
+                "⬇️ Baixar REQ (HTML)",
+                data=st.session_state["_doc_html_bytes"],
+                file_name=nome_html,
+                mime="text/html",
+                use_container_width=True,
+            )
+
         if st.session_state.get("_doc_req_cadastrada"):
-            link = st.session_state.get("_doc_drive_link", "")
             st.success("✅ Requisição cadastrada!")
-            if link:
-                st.markdown(f"📄 [Abrir REQ no Drive]({link})", unsafe_allow_html=False)
         else:
-            st.info("📋 Deseja cadastrar esta requisição?")
+            st.info("📋 Deseja cadastrar esta requisição na planilha?")
             cad1, cad2 = st.columns(2)
             if cad1.button("✅ Sim, cadastrar", type="primary", use_container_width=True, key="btn_cad_sim"):
-                with st.spinner("Salvando no Drive e cadastrando..."):
-                    try:
-                        from sheets_nc import adicionar_req, salvar_req_no_drive
-                        from gerador_req_html import gerar_html_req
-                        cf          = st.session_state["_doc_campos"]
-                        itens_lim   = st.session_state.get("_doc_itens_limpos", [])
-                        req_num     = cf.get("requisition_id", "doc")
-
-                        # 1. Gera e salva HTML no Drive
-                        html = gerar_html_req(cf, itens_lim)
-                        link = salvar_req_no_drive(html, req_num)
-
-                        # 2. Cadastra na planilha com link do Drive
-                        desc = "; ".join(i.get("DESCRICAO_ITEM","")[:40] for i in itens_lim[:3])
-                        adicionar_req({
-                            "REQ":        req_num,
-                            "NE":         cf.get("NE", ""),
-                            "NC":         st.session_state.get("gerar_nc_sel", ""),
-                            "PI":         cf.get("PI", ""),
-                            "FINALIDADE": cf.get("ASSUNTO", ""),
-                            "TIPO":       cf.get("TIPO", "Ordinário"),
-                            "EMPRESA":    cf.get("FORNECEDOR_NOME", ""),
-                            "DESCRIÇÃO":  desc,
-                            "VALOR":      st.session_state.get("_doc_total", 0.0),
-                            "SITUAÇÃO":   "Pendente",
-                            "ARQUIVO REQ": link,
-                        })
-                        carregar(forcar=True)
-                        st.session_state["_doc_req_cadastrada"] = True
-                        st.session_state["_doc_drive_link"]     = link
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao cadastrar: {e}")
+                try:
+                    from sheets_nc import adicionar_req
+                    cf      = st.session_state["_doc_campos"]
+                    itens_lim = st.session_state.get("_doc_itens_limpos", [])
+                    req_num = cf.get("requisition_id", "")
+                    desc    = "; ".join(i.get("DESCRICAO_ITEM","")[:40] for i in itens_lim[:3])
+                    adicionar_req({
+                        "REQ":        req_num,
+                        "NE":         cf.get("NE", ""),
+                        "NC":         st.session_state.get("gerar_nc_sel", ""),
+                        "PI":         cf.get("PI", ""),
+                        "FINALIDADE": cf.get("ASSUNTO", ""),
+                        "TIPO":       cf.get("TIPO", "Ordinário"),
+                        "EMPRESA":    cf.get("FORNECEDOR_NOME", ""),
+                        "DESCRIÇÃO":  desc,
+                        "VALOR":      st.session_state.get("_doc_total", 0.0),
+                        "SITUAÇÃO":   "Pendente",
+                        "ARQUIVO REQ": "",
+                    })
+                    carregar(forcar=True)
+                    st.session_state["_doc_req_cadastrada"] = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao cadastrar: {e}")
             if cad2.button("✖ Não", use_container_width=True, key="btn_cad_nao"):
                 st.session_state["_doc_req_cadastrada"] = True
                 st.rerun()
