@@ -1088,75 +1088,116 @@ def page_reqs(reqs_legado, ncs):
         })
 
     # ── Lista com ações por linha ──────────────────────────────────────
-    from reqs_crud import excluir_req as _excluir, editar_req as _editar
+    from reqs_crud import excluir_req as _excluir
 
     for ridx, (row, r_orig) in enumerate(zip(rows, filtradas)):
         ca, cb, cc, cd, ce, cf = st.columns([1, 2, 5, 1, 1, 1])
         ca.markdown(row[""])
         cb.markdown(f"**{row['REQ']}** {row['DATA']}")
         cc.markdown(f"{row['EMPRESA']} · {row['NC']} · {row['VALOR']} · _{row['SITUACAO']}_")
-
-        if cd.button("✏️", key=f"edit_{ridx}", help="Editar"):
-            st.session_state["edit_inline"] = ridx
-        if ce.button("🗑️", key=f"del_{ridx}", help="Apagar"):
-            _excluir(row["REQ"])
+        if cd.button("✏️", key=f"edit_{ridx}"):
+            st.session_state["edit_req"] = row["REQ"]
             st.rerun()
-        if cf.button("📧", key=f"email_{ridx}", help="Enviar por email"):
-            st.session_state["email_req_num"] = row["REQ"]
+        if ce.button("🗑️", key=f"del_{ridx}"):
+            _excluir(row["REQ"])
+            st.session_state.pop("edit_req", None)
+            st.rerun()
+        if cf.button("📧", key=f"email_{ridx}"):
+            st.session_state["email_req"] = row["REQ"]
+            st.rerun()
 
-        # Formulário de edição inline
-        if st.session_state.get("edit_inline") == ridx:
-            with st.form(f"form_edit_{ridx}"):
-                ec1, ec2 = st.columns(2)
-                emp  = ec1.text_input("Empresa", value=r_orig.get("EMPRESA",""), key=f"e_emp_{ridx}")
-                ne_e = ec1.text_input("NE",      value=r_orig.get("NE",""),      key=f"e_ne_{ridx}")
-                val_e= ec1.number_input("Valor",  value=parse(r_orig.get("VALOR","0")),
-                                        min_value=0.0, step=0.01, format="%.2f", key=f"e_val_{ridx}")
-                sit_e= ec2.selectbox("Situação", ["Pendente","Empenhada","Anulado"],
-                                     index=["Pendente","Empenhada","Anulado"].index(
-                                         r_orig.get("SITUACAO","Pendente"))
-                                     if r_orig.get("SITUACAO","Pendente") in ["Pendente","Empenhada","Anulado"] else 0,
-                                     key=f"e_sit_{ridx}")
-                ent_e= ec2.text_input("Entrada SALC", value=r_orig.get("ENTRADA_SALC",""), key=f"e_ent_{ridx}")
-                obs_e= ec2.text_input("Obs",           value=r_orig.get("OBS",""),          key=f"e_obs_{ridx}")
-                sb1, sb2 = st.columns(2)
-                if sb1.form_submit_button("💾 Salvar", type="primary", use_container_width=True):
-                    _editar(row["REQ"], {**r_orig, "EMPRESA": emp, "NE": ne_e, "VALOR": val_e,
-                                         "SITUACAO": sit_e, "ENTRADA_SALC": ent_e, "OBS": obs_e})
-                    st.session_state.pop("edit_inline", None)
-                    st.rerun()
-                if sb2.form_submit_button("✖ Cancelar", use_container_width=True):
-                    st.session_state.pop("edit_inline", None)
-                    st.rerun()
+    # ── Painel de edição / email (fora do loop) ───────────────────────
+    req_acao = st.session_state.get("edit_req") or st.session_state.get("email_req")
+    if req_acao:
+        r_edit = next((r for r in filtradas if r.get("REQ") == req_acao), None)
+        if not r_edit:
+            st.session_state.pop("edit_req", None)
+            st.session_state.pop("email_req", None)
+        elif st.session_state.get("edit_req"):
+            st.divider()
+            st.subheader(f"✏️ Editar REQ {req_acao}")
+            from reqs_crud import editar_req as _editar
+            # Guarda valores editáveis no session state para persistir
+            _pfx = f"_ed_{req_acao}_"
+            for k, default in [("EMPRESA", r_edit.get("EMPRESA","")),
+                                ("NE",      r_edit.get("NE","")),
+                                ("CNPJ",    r_edit.get("CNPJ","")),
+                                ("OBS",     r_edit.get("OBS","")),
+                                ("ENTRADA_SALC", r_edit.get("ENTRADA_SALC","")),
+                                ("SITUACAO",r_edit.get("SITUACAO","Pendente"))]:
+                st.session_state.setdefault(_pfx + k, default)
 
-        # Envio por email inline
-        if st.session_state.get("email_req_num") == row["REQ"]:
-            with st.form(f"form_email_{ridx}"):
-                dest = st.text_input("Email do destinatário", key=f"email_dest_{ridx}")
-                ev1, ev2 = st.columns(2)
-                if ev1.form_submit_button("📧 Enviar", type="primary", use_container_width=True):
+            ec1, ec2 = st.columns(2)
+            emp  = ec1.text_input("Empresa",      key=_pfx+"EMPRESA")
+            ne_e = ec1.text_input("NE",           key=_pfx+"NE")
+            cnpj = ec1.text_input("CNPJ",         key=_pfx+"CNPJ")
+            obs  = ec1.text_input("Obs",          key=_pfx+"OBS")
+            sit_ops = ["Pendente","Empenhada","Anulado"]
+            sit_e   = ec2.selectbox("Situação", sit_ops,
+                                    index=sit_ops.index(st.session_state[_pfx+"SITUACAO"])
+                                    if st.session_state[_pfx+"SITUACAO"] in sit_ops else 0,
+                                    key=_pfx+"SITUACAO")
+            ent_e   = ec2.text_input("Entrada SALC", key=_pfx+"ENTRADA_SALC")
+            try:
+                val_def = parse(r_edit.get("VALOR","0"))
+            except Exception:
+                val_def = 0.0
+            val_e = ec2.number_input("Valor (R$)", value=val_def,
+                                     min_value=0.0, step=0.01, format="%.2f",
+                                     key=_pfx+"VALOR")
+
+            sb1, sb2 = st.columns(2)
+            if sb1.button("💾 Salvar edição", type="primary", use_container_width=True, key="btn_sv_edit"):
+                try:
+                    _editar(req_acao, {**r_edit,
+                                       "EMPRESA": emp, "NE": ne_e, "CNPJ": cnpj,
+                                       "OBS": obs, "SITUACAO": sit_e,
+                                       "ENTRADA_SALC": ent_e, "VALOR": val_e})
+                    # Limpa prefixo
+                    for k in list(st.session_state.keys()):
+                        if k.startswith(_pfx):
+                            del st.session_state[k]
+                    st.session_state.pop("edit_req", None)
+                    st.success("✅ REQ atualizada!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar: {e}")
+            if sb2.button("✖ Cancelar", use_container_width=True, key="btn_cancel_edit"):
+                st.session_state.pop("edit_req", None)
+                st.rerun()
+
+        elif st.session_state.get("email_req"):
+            st.divider()
+            st.subheader(f"📧 Enviar REQ {req_acao} por email")
+            dest = st.text_input("Email do destinatário", key="email_dest_inp")
+            se1, se2 = st.columns(2)
+            if se1.button("📧 Enviar", type="primary", use_container_width=True, key="btn_send_email"):
+                if dest:
                     try:
                         from gerador_req_html import gerar_html_req
-                        itens_e  = itens_da_req(row["REQ"])
-                        campos_e = {"requisition_id": r_orig.get("REQ",""),
-                                    "LOCAL_DATA": r_orig.get("DATA",""), "UG": UG_PADRAO,
-                                    "OM": OM_PADRAO, "FORNECEDOR_NOME": r_orig.get("EMPRESA",""),
-                                    "FORNECEDOR_CNPJ": r_orig.get("CNPJ",""),
-                                    "MODALIDADE": r_orig.get("PREGAO",""),
-                                    "DADOS_NC": r_orig.get("NC",""), "NE": r_orig.get("NE",""),
-                                    "PI": r_orig.get("PI",""), "ND": r_orig.get("ND",""),
-                                    "TIPO": r_orig.get("TIPO","Ordinário"),
-                                    "TOTAL": fmt(_val(r_orig)),
-                                    "ASSUNTO":"","INTRO_1":"","JUSTIFICATIVA":"","FINALIDADE":"","PTRES":""}
+                        itens_e = itens_da_req(req_acao)
+                        campos_e = {"requisition_id": r_edit.get("REQ",""),
+                                    "LOCAL_DATA": r_edit.get("DATA",""), "UG": UG_PADRAO,
+                                    "OM": OM_PADRAO,
+                                    "FORNECEDOR_NOME": r_edit.get("EMPRESA",""),
+                                    "FORNECEDOR_CNPJ": r_edit.get("CNPJ",""),
+                                    "MODALIDADE": r_edit.get("PREGAO",""),
+                                    "DADOS_NC": r_edit.get("NC",""), "NE": r_edit.get("NE",""),
+                                    "PI": r_edit.get("PI",""), "ND": r_edit.get("ND",""),
+                                    "TIPO": r_edit.get("TIPO","Ordinário"),
+                                    "TOTAL": fmt(_val(r_edit)),
+                                    "ASSUNTO":"","INTRO_1":"","JUSTIFICATIVA":"",
+                                    "FINALIDADE":"","PTRES":""}
                         html_e = gerar_html_req(campos_e, itens_e)
-                        _enviar_email(dest, f"REQ {row['REQ']}", html_e)
-                        st.success(f"✅ Enviado para {dest}!")
-                        st.session_state.pop("email_req_num", None)
+                        _enviar_email(dest, f"REQ {req_acao}", html_e)
+                        st.success(f"✅ Email enviado para {dest}!")
+                        st.session_state.pop("email_req", None)
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Erro: {e}")
-                if ev2.form_submit_button("✖ Cancelar", use_container_width=True):
-                    st.session_state.pop("email_req_num", None)
-                    st.rerun()
+            if se2.button("✖ Cancelar", use_container_width=True, key="btn_cancel_email"):
+                st.session_state.pop("email_req", None)
+                st.rerun()
 
     st.divider()
     st.caption("Tabela completa (edite Situação, Entrada SALC e NE diretamente):")
@@ -1237,44 +1278,37 @@ def page_reqs(reqs_legado, ncs):
     if not reqs_com_html:
         st.caption("Nenhuma REQ cadastrada ainda.")
     else:
-        cv1, cv2 = st.columns([3,1])
-        req_vis = cv1.selectbox("REQ", reqs_com_html, key="vis_req_sel",
-                                label_visibility="collapsed")
-
-        gerar_vis = cv2.button("📄 Ver", type="primary", use_container_width=True, key="btn_vis")
-
-        # Regenera quando muda a seleção ou clica o botão
-        if gerar_vis or st.session_state.get("_vis_ultima") != req_vis:
-            st.session_state["_vis_ultima"] = req_vis
+        req_vis = st.selectbox("REQ para visualizar", reqs_com_html, key="vis_req_sel")
+        if st.button("📄 Gerar visualização", type="primary",
+                     use_container_width=True, key="btn_vis_req"):
+            r_data = next((r for r in reqs if r.get("REQ") == req_vis), {})
             try:
                 from gerador_req_html import gerar_html_req
-                r_data = next((r for r in reqs if r.get("REQ") == req_vis), {})
-                itens  = itens_da_req(req_vis)
                 campos_v = {
-                    "requisition_id":  r_data.get("REQ",""),
-                    "LOCAL_DATA":      r_data.get("DATA",""),
-                    "UG":              UG_PADRAO,
-                    "OM":              OM_PADRAO,
+                    "requisition_id": r_data.get("REQ",""),
+                    "LOCAL_DATA": r_data.get("DATA",""),
+                    "UG": UG_PADRAO, "OM": OM_PADRAO,
                     "FORNECEDOR_NOME": r_data.get("EMPRESA",""),
                     "FORNECEDOR_CNPJ": r_data.get("CNPJ",""),
-                    "MODALIDADE":      r_data.get("PREGAO",""),
-                    "DADOS_NC":        r_data.get("NC",""),
-                    "NE":              r_data.get("NE",""),
-                    "PI":              r_data.get("PI",""),
-                    "ND":              r_data.get("ND",""),
-                    "TIPO":            r_data.get("TIPO","Ordinário"),
-                    "TOTAL":           fmt(_val(r_data)),
-                    "ASSUNTO": "", "INTRO_1": "", "JUSTIFICATIVA": "",
-                    "FINALIDADE": "", "PTRES": "",
+                    "MODALIDADE": r_data.get("PREGAO",""),
+                    "DADOS_NC": r_data.get("NC",""),
+                    "NE": r_data.get("NE",""), "PI": r_data.get("PI",""),
+                    "ND": r_data.get("ND",""), "TIPO": r_data.get("TIPO","Ordinário"),
+                    "TOTAL": fmt(_val(r_data)),
+                    "ASSUNTO":"","INTRO_1":"","JUSTIFICATIVA":"","FINALIDADE":"","PTRES":"",
                 }
-                st.session_state["vis_req_html"] = gerar_html_req(campos_v, itens)
+                html_g = gerar_html_req(campos_v, itens_da_req(req_vis))
+                st.session_state["_vis_html"]  = html_g
+                st.session_state["_vis_bytes"] = html_g.encode("utf-8")
+                st.session_state["_vis_req"]   = req_vis
             except Exception as e:
-                st.error(f"Erro ao gerar HTML: {e}")
-                st.session_state["vis_req_html"] = ""
+                st.error(f"Erro ao gerar: {e}")
 
-        html_v = st.session_state.get("vis_req_html", "")
-        if html_v:
-            components.html(html_v, height=850, scrolling=True)
+        if st.session_state.get("_vis_req") == req_vis and st.session_state.get("_vis_html"):
+            st.download_button("⬇️ Baixar HTML", data=st.session_state["_vis_bytes"],
+                               file_name=f"REQ_{req_vis}.html", mime="text/html",
+                               use_container_width=True)
+            components.html(st.session_state["_vis_html"], height=860, scrolling=True)
 
 
 def _form_editar_req(ncs, reqs):
