@@ -1066,6 +1066,10 @@ def page_reqs(reqs_legado, ncs):
     if st.session_state.get("form_req"):
         _form_req_novo(ncs)
 
+    # ── Formulário de edição ───────────────────────────────────────────
+    if st.session_state.get("edit_req_num"):
+        _form_editar_req(ncs, reqs)
+
     if not filtradas:
         st.info("Nenhuma REQ encontrada.")
         return
@@ -1086,6 +1090,21 @@ def page_reqs(reqs_legado, ncs):
             "ENTRADA":    r.get("ENTRADA_SALC", ""),
             "OBS":        r.get("OBS", ""),
         })
+
+    # Botões de ação por linha (acima da tabela)
+    st.caption("Selecione uma REQ para editar ou apagar:")
+    sel_cols = st.columns([2, 1, 1, 6])
+    req_selecionada = sel_cols[0].selectbox("REQ", [r.get("REQ","") for r in filtradas],
+                                             key="req_sel_acao", label_visibility="collapsed")
+    if sel_cols[1].button("✏️ Editar", use_container_width=True, key="btn_editar_req"):
+        st.session_state["edit_req_num"] = req_selecionada
+        st.rerun()
+    if sel_cols[2].button("🗑️ Apagar", use_container_width=True, key="btn_apagar_req"):
+        if req_selecionada:
+            from reqs_crud import excluir_req
+            excluir_req(req_selecionada)
+            st.success(f"✅ REQ {req_selecionada} apagada.")
+            st.rerun()
 
     df_r   = pd.DataFrame(rows)
     edited = st.data_editor(
@@ -1202,6 +1221,74 @@ def page_reqs(reqs_legado, ncs):
         html_v = st.session_state.get("vis_req_html", "")
         if html_v:
             components.html(html_v, height=850, scrolling=True)
+
+
+def _form_editar_req(ncs, reqs):
+    from reqs_crud import editar_req
+    req_num = st.session_state.get("edit_req_num", "")
+    r_data  = next((r for r in reqs if r.get("REQ") == req_num), {})
+    if not r_data:
+        st.session_state.pop("edit_req_num", None)
+        return
+
+    st.divider()
+    st.subheader(f"✏️ Editar REQ {req_num}")
+
+    nums_nc = [""] + [nc.get("NC","") for nc in ncs if nc.get("NC")]
+    nc_idx  = nums_nc.index(r_data.get("NC","")) if r_data.get("NC","") in nums_nc else 0
+    nc_sel  = st.selectbox("NC Vinculada", nums_nc, index=nc_idx, key="_edit_nc")
+    nc_d    = next((nc for nc in ncs if nc.get("NC") == nc_sel), {}) if nc_sel else {}
+
+    with st.form("f_editar_req", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        empresa = c1.text_input("Empresa", value=r_data.get("EMPRESA",""))
+        cnpj    = c1.text_input("CNPJ",    value=r_data.get("CNPJ",""))
+        ne      = c1.text_input("NE",      value=r_data.get("NE",""))
+        obs     = c1.text_input("Obs",     value=r_data.get("OBS",""))
+
+        tipo    = c2.selectbox("Tipo", ["Ordinário","Especial","Anulação"],
+                               index=["Ordinário","Especial","Anulação"].index(r_data.get("TIPO","Ordinário"))
+                               if r_data.get("TIPO","Ordinário") in ["Ordinário","Especial","Anulação"] else 0)
+        sit_ops = ["Pendente","Empenhada","Anulado"]
+        sit_idx = sit_ops.index(r_data.get("SITUACAO","Pendente")) if r_data.get("SITUACAO","Pendente") in sit_ops else 0
+        situacao = c2.selectbox("Situação", sit_ops, index=sit_idx)
+        entrada  = c2.text_input("Entrada SALC", value=r_data.get("ENTRADA_SALC",""))
+
+        try:
+            valor_atual = float(str(r_data.get("VALOR","0")).replace("R$","").replace(".","").replace(",",".").strip() or 0)
+        except Exception:
+            valor_atual = 0.0
+        valor = st.number_input("Valor (R$)", value=valor_atual, min_value=0.0, step=0.01, format="%.2f")
+
+        s1, s2 = st.columns(2)
+        salvar   = s1.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
+        cancelar = s2.form_submit_button("✖ Cancelar", use_container_width=True)
+
+        if cancelar:
+            st.session_state.pop("edit_req_num", None)
+            st.rerun()
+        if salvar:
+            try:
+                editar_req(req_num, {
+                    "DATA":         r_data.get("DATA",""),
+                    "NC":           nc_sel,
+                    "NE":           ne,
+                    "PI":           nc_d.get("PI", r_data.get("PI","")),
+                    "ND":           nc_d.get("ND", r_data.get("ND","")),
+                    "EMPRESA":      empresa,
+                    "CNPJ":         cnpj,
+                    "PREGAO":       r_data.get("PREGAO",""),
+                    "TIPO":         tipo,
+                    "VALOR":        valor,
+                    "SITUACAO":     situacao,
+                    "ENTRADA_SALC": entrada,
+                    "OBS":          obs,
+                })
+                st.success(f"✅ REQ {req_num} atualizada!")
+                st.session_state.pop("edit_req_num", None)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro: {e}")
 
 
 def _form_req(ncs):
@@ -2111,36 +2198,51 @@ def page_gerar_req(reqs, ncs):
             except Exception as e:
                 st.error(f"Erro ao gerar documento: {e}")
 
-    # ── Download + confirmação de cadastro ────────────────────────────
+    # ── Documento pronto: Drive ou download ───────────────────────────
     if st.session_state.get("_doc_bytes"):
-        st.download_button(
-            "⬇️ Baixar Documento",
-            data=st.session_state["_doc_bytes"],
-            file_name=st.session_state.get("_doc_nome", "REQ.docx"),
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True,
-        )
+        nome_arq   = st.session_state.get("_doc_nome", "REQ.docx")
+        doc_bytes  = st.session_state["_doc_bytes"]
+        drive_link = st.session_state.get("_doc_drive_link", "")
 
-        # Gera HTML sempre que o doc está pronto
+        if not drive_link:
+            # Tenta enviar ao Drive se DRIVE_FOLDER_ID estiver configurado
+            from config import DRIVE_FOLDER_ID as _dfid
+            if _dfid:
+                with st.spinner("Enviando ao Drive..."):
+                    try:
+                        from sheets_nc import salvar_arquivo_no_drive
+                        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        drive_link = salvar_arquivo_no_drive(doc_bytes, nome_arq, mime)
+                        st.session_state["_doc_drive_link"] = drive_link
+                    except Exception as e:
+                        st.warning(f"Drive indisponível ({e}) — use o download abaixo.")
+
+        if drive_link:
+            st.success(f"✅ DOCX salvo no Drive!")
+            st.markdown(f"📄 [Abrir {nome_arq} no Drive]({drive_link})")
+        else:
+            st.download_button(
+                "⬇️ Baixar DOCX",
+                data=doc_bytes,
+                file_name=nome_arq,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+
+        # HTML sempre disponível para download
         if not st.session_state.get("_doc_html_bytes"):
             try:
                 from gerador_req_html import gerar_html_req
-                cf        = st.session_state.get("_doc_campos", {})
-                itens_lim = st.session_state.get("_doc_itens_limpos", [])
-                html      = gerar_html_req(cf, itens_lim)
+                html = gerar_html_req(st.session_state.get("_doc_campos",{}),
+                                      st.session_state.get("_doc_itens_limpos",[]))
                 st.session_state["_doc_html_bytes"] = html.encode("utf-8")
             except Exception:
                 pass
-
         if st.session_state.get("_doc_html_bytes"):
-            nome_html = st.session_state.get("_doc_nome", "REQ.docx").replace(".docx", ".html")
-            st.download_button(
-                "⬇️ Baixar REQ (HTML)",
-                data=st.session_state["_doc_html_bytes"],
-                file_name=nome_html,
-                mime="text/html",
-                use_container_width=True,
-            )
+            nome_html = nome_arq.replace(".docx", ".html")
+            st.download_button("⬇️ Baixar HTML", data=st.session_state["_doc_html_bytes"],
+                               file_name=nome_html, mime="text/html",
+                               use_container_width=True)
 
         if st.session_state.get("_doc_req_cadastrada"):
             st.success("✅ Requisição cadastrada!")

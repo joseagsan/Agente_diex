@@ -117,6 +117,70 @@ def atualizar_req(req_num: str, situacao: str = None, entrada_salc: str = None,
             return
 
 
+def excluir_req(req_num: str) -> None:
+    """Remove a linha da REQ na aba SSAC_REQS."""
+    ws    = _ws()
+    todos = ws.get_all_values()
+    if not todos:
+        return
+    headers  = todos[0]
+    col_req  = headers.index("REQ") + 1 if "REQ" in headers else 1
+    for i, row in enumerate(todos[1:], start=2):
+        val = row[col_req - 1] if len(row) >= col_req else ""
+        if str(val).strip() == str(req_num).strip():
+            ws.delete_rows(i)
+            logger.info("REQ %s excluída.", req_num)
+            return
+
+
+def editar_req(req_num: str, dados: dict) -> None:
+    """Atualiza todos os campos de uma REQ existente."""
+    ws    = _ws()
+    todos = ws.get_all_values()
+    if not todos:
+        return
+    headers = todos[0]
+
+    def col(name):
+        return headers.index(name) + 1 if name in headers else None
+
+    col_req = col("REQ")
+    if not col_req:
+        return
+
+    from gspread.utils import rowcol_to_a1
+    for i, row in enumerate(todos[1:], start=2):
+        val = row[col_req - 1] if len(row) >= col_req else ""
+        if str(val).strip() == str(req_num).strip():
+            valor = dados.get("VALOR", 0.0)
+            valor_fmt = format_moeda(float(valor)) if isinstance(valor, (int, float)) else str(valor)
+            import json as _json
+            itens     = dados.get("ITENS", [])
+            linha = {
+                "REQ":          str(req_num),
+                "DATA":         dados.get("DATA", ""),
+                "NC":           dados.get("NC", ""),
+                "NE":           dados.get("NE", ""),
+                "PI":           dados.get("PI", ""),
+                "ND":           dados.get("ND", ""),
+                "EMPRESA":      dados.get("EMPRESA", ""),
+                "CNPJ":         dados.get("CNPJ", ""),
+                "PREGAO":       dados.get("PREGAO", ""),
+                "TIPO":         dados.get("TIPO", "Ordinário"),
+                "VALOR":        valor_fmt,
+                "SITUACAO":     dados.get("SITUACAO", "Pendente"),
+                "ENTRADA_SALC": dados.get("ENTRADA_SALC", ""),
+                "OBS":          dados.get("OBS", ""),
+                "ITENS_JSON":   _json.dumps(itens, ensure_ascii=False) if itens else "",
+            }
+            row_vals = [linha.get(c, "") for c in COLUNAS]
+            end_col  = rowcol_to_a1(1, len(COLUNAS)).replace("1", "")
+            ws.update(range_name=f"A{i}:{end_col}{i}", values=[row_vals],
+                      value_input_option="RAW")
+            logger.info("REQ %s editada.", req_num)
+            return
+
+
 def itens_da_req(req_num: str) -> list[dict]:
     """Retorna os itens de uma REQ (armazenados como JSON)."""
     reqs = ler_reqs()

@@ -671,6 +671,26 @@ def _get_ou_criar_pasta(service) -> str:
     )
 
 
+def salvar_arquivo_no_drive(conteudo: bytes, nome: str, mimetype: str) -> str:
+    """Salva qualquer arquivo no Drive e retorna o link de visualização."""
+    from googleapiclient.http import MediaInMemoryUpload
+    service   = _get_drive_service()
+    folder_id = _get_ou_criar_pasta(service)
+
+    # Remove versão anterior
+    q = f"name='{nome}' and '{folder_id}' in parents and trashed=false"
+    for arq in service.files().list(q=q, fields="files(id)").execute().get("files", []):
+        service.files().delete(fileId=arq["id"]).execute()
+
+    meta  = {"name": nome, "parents": [folder_id], "mimeType": mimetype}
+    media = MediaInMemoryUpload(conteudo, mimetype=mimetype)
+    arq   = service.files().create(body=meta, media_body=media, fields="id").execute()
+    _compartilhar(service, arq["id"])
+    link = f"https://drive.google.com/file/d/{arq['id']}/view"
+    logger.info("Arquivo %s salvo no Drive: %s", nome, link)
+    return link
+
+
 def salvar_req_no_drive(html_content: str, req_num: str) -> str:
     """
     Salva o HTML da REQ no Google Drive e retorna o link de visualização.
