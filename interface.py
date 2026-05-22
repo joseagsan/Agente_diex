@@ -1167,15 +1167,20 @@ def page_reqs(reqs_legado, ncs):
         cv1, cv2 = st.columns([3,1])
         req_vis = cv1.selectbox("REQ", reqs_com_html, key="vis_req_sel",
                                 label_visibility="collapsed")
-        if cv2.button("📄 Visualizar", type="primary", use_container_width=True, key="btn_vis"):
-            with st.spinner("Gerando visualização..."):
+
+        gerar_vis = cv2.button("📄 Ver", type="primary", use_container_width=True, key="btn_vis")
+
+        # Regenera quando muda a seleção ou clica o botão
+        if gerar_vis or st.session_state.get("_vis_ultima") != req_vis:
+            st.session_state["_vis_ultima"] = req_vis
+            try:
                 from gerador_req_html import gerar_html_req
-                r_data   = next((r for r in reqs if r.get("REQ") == req_vis), {})
-                itens    = itens_da_req(req_vis)
+                r_data = next((r for r in reqs if r.get("REQ") == req_vis), {})
+                itens  = itens_da_req(req_vis)
                 campos_v = {
                     "requisition_id":  r_data.get("REQ",""),
                     "LOCAL_DATA":      r_data.get("DATA",""),
-                    "UG":              r_data.get("PI",""),
+                    "UG":              UG_PADRAO,
                     "OM":              OM_PADRAO,
                     "FORNECEDOR_NOME": r_data.get("EMPRESA",""),
                     "FORNECEDOR_CNPJ": r_data.get("CNPJ",""),
@@ -1186,14 +1191,17 @@ def page_reqs(reqs_legado, ncs):
                     "ND":              r_data.get("ND",""),
                     "TIPO":            r_data.get("TIPO","Ordinário"),
                     "TOTAL":           fmt(_val(r_data)),
+                    "ASSUNTO": "", "INTRO_1": "", "JUSTIFICATIVA": "",
+                    "FINALIDADE": "", "PTRES": "",
                 }
                 st.session_state["vis_req_html"] = gerar_html_req(campos_v, itens)
-                st.session_state["vis_req_num"]  = req_vis
+            except Exception as e:
+                st.error(f"Erro ao gerar HTML: {e}")
+                st.session_state["vis_req_html"] = ""
 
-        html_v = st.session_state.get("vis_req_html","")
+        html_v = st.session_state.get("vis_req_html", "")
         if html_v:
-            st.success(f"📄 REQ {st.session_state.get('vis_req_num','')}")
-            components.html(html_v, height=820, scrolling=True)
+            components.html(html_v, height=850, scrolling=True)
 
 
 def _form_req(ncs):
