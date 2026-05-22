@@ -33,3 +33,5 @@ ABA_FORNECEDORES     = _s("ABA_FORNECEDORES", "AGENDA")
 UG_PADRAO            = _s("UG",  "160482")
 OM_PADRAO            = _s("OM",  "10º GAC Sl")
 DRIVE_FOLDER_ID      = _s("DRIVE_FOLDER_ID", "")
+EMAIL_SENDER         = _s("EMAIL_SENDER",  "")   # ex: sac10gacsl@gmail.com
+EMAIL_PASSWORD       = _s("EMAIL_PASSWORD", "")  # senha de app do Gmail

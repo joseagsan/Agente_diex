@@ -1066,10 +1066,6 @@ def page_reqs(reqs_legado, ncs):
     if st.session_state.get("form_req"):
         _form_req_novo(ncs)
 
-    # ── Formulário de edição ───────────────────────────────────────────
-    if st.session_state.get("edit_req_num"):
-        _form_editar_req(ncs, reqs)
-
     if not filtradas:
         st.info("Nenhuma REQ encontrada.")
         return
@@ -1092,18 +1088,75 @@ def page_reqs(reqs_legado, ncs):
         })
 
     # ── Lista com ações por linha ──────────────────────────────────────
-    from reqs_crud import excluir_req as _excluir
-    for ridx, row in enumerate(rows):
-        ca, cb, cc, cd, ce = st.columns([1, 2, 5, 1, 1])
+    from reqs_crud import excluir_req as _excluir, editar_req as _editar
+
+    for ridx, (row, r_orig) in enumerate(zip(rows, filtradas)):
+        ca, cb, cc, cd, ce, cf = st.columns([1, 2, 5, 1, 1, 1])
         ca.markdown(row[""])
-        cb.markdown(f"**{row['REQ']}** — {row['DATA']}")
-        cc.markdown(f"{row['EMPRESA']} | {row['NC']} | {row['VALOR']} | {row['SITUACAO']}")
+        cb.markdown(f"**{row['REQ']}** {row['DATA']}")
+        cc.markdown(f"{row['EMPRESA']} · {row['NC']} · {row['VALOR']} · _{row['SITUACAO']}_")
+
         if cd.button("✏️", key=f"edit_{ridx}", help="Editar"):
-            st.session_state["edit_req_num"] = row["REQ"]
-            st.rerun()
+            st.session_state["edit_inline"] = ridx
         if ce.button("🗑️", key=f"del_{ridx}", help="Apagar"):
             _excluir(row["REQ"])
             st.rerun()
+        if cf.button("📧", key=f"email_{ridx}", help="Enviar por email"):
+            st.session_state["email_req_num"] = row["REQ"]
+
+        # Formulário de edição inline
+        if st.session_state.get("edit_inline") == ridx:
+            with st.form(f"form_edit_{ridx}"):
+                ec1, ec2 = st.columns(2)
+                emp  = ec1.text_input("Empresa", value=r_orig.get("EMPRESA",""), key=f"e_emp_{ridx}")
+                ne_e = ec1.text_input("NE",      value=r_orig.get("NE",""),      key=f"e_ne_{ridx}")
+                val_e= ec1.number_input("Valor",  value=parse(r_orig.get("VALOR","0")),
+                                        min_value=0.0, step=0.01, format="%.2f", key=f"e_val_{ridx}")
+                sit_e= ec2.selectbox("Situação", ["Pendente","Empenhada","Anulado"],
+                                     index=["Pendente","Empenhada","Anulado"].index(
+                                         r_orig.get("SITUACAO","Pendente"))
+                                     if r_orig.get("SITUACAO","Pendente") in ["Pendente","Empenhada","Anulado"] else 0,
+                                     key=f"e_sit_{ridx}")
+                ent_e= ec2.text_input("Entrada SALC", value=r_orig.get("ENTRADA_SALC",""), key=f"e_ent_{ridx}")
+                obs_e= ec2.text_input("Obs",           value=r_orig.get("OBS",""),          key=f"e_obs_{ridx}")
+                sb1, sb2 = st.columns(2)
+                if sb1.form_submit_button("💾 Salvar", type="primary", use_container_width=True):
+                    _editar(row["REQ"], {**r_orig, "EMPRESA": emp, "NE": ne_e, "VALOR": val_e,
+                                         "SITUACAO": sit_e, "ENTRADA_SALC": ent_e, "OBS": obs_e})
+                    st.session_state.pop("edit_inline", None)
+                    st.rerun()
+                if sb2.form_submit_button("✖ Cancelar", use_container_width=True):
+                    st.session_state.pop("edit_inline", None)
+                    st.rerun()
+
+        # Envio por email inline
+        if st.session_state.get("email_req_num") == row["REQ"]:
+            with st.form(f"form_email_{ridx}"):
+                dest = st.text_input("Email do destinatário", key=f"email_dest_{ridx}")
+                ev1, ev2 = st.columns(2)
+                if ev1.form_submit_button("📧 Enviar", type="primary", use_container_width=True):
+                    try:
+                        from gerador_req_html import gerar_html_req
+                        itens_e  = itens_da_req(row["REQ"])
+                        campos_e = {"requisition_id": r_orig.get("REQ",""),
+                                    "LOCAL_DATA": r_orig.get("DATA",""), "UG": UG_PADRAO,
+                                    "OM": OM_PADRAO, "FORNECEDOR_NOME": r_orig.get("EMPRESA",""),
+                                    "FORNECEDOR_CNPJ": r_orig.get("CNPJ",""),
+                                    "MODALIDADE": r_orig.get("PREGAO",""),
+                                    "DADOS_NC": r_orig.get("NC",""), "NE": r_orig.get("NE",""),
+                                    "PI": r_orig.get("PI",""), "ND": r_orig.get("ND",""),
+                                    "TIPO": r_orig.get("TIPO","Ordinário"),
+                                    "TOTAL": fmt(_val(r_orig)),
+                                    "ASSUNTO":"","INTRO_1":"","JUSTIFICATIVA":"","FINALIDADE":"","PTRES":""}
+                        html_e = gerar_html_req(campos_e, itens_e)
+                        _enviar_email(dest, f"REQ {row['REQ']}", html_e)
+                        st.success(f"✅ Enviado para {dest}!")
+                        st.session_state.pop("email_req_num", None)
+                    except Exception as e:
+                        st.error(f"Erro: {e}")
+                if ev2.form_submit_button("✖ Cancelar", use_container_width=True):
+                    st.session_state.pop("email_req_num", None)
+                    st.rerun()
 
     st.divider()
     st.caption("Tabela completa (edite Situação, Entrada SALC e NE diretamente):")
@@ -2269,6 +2322,32 @@ def _num_si(si_str: str) -> str:
         return ""
     m = re.search(r"SI\s+(\d+)", si_str)
     return m.group(1) if m else si_str
+
+
+def _enviar_email(destinatario: str, assunto: str, html_body: str) -> None:
+    """Envia email com o HTML da REQ como corpo."""
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from config import EMAIL_SENDER, EMAIL_PASSWORD
+
+    if not EMAIL_SENDER or not EMAIL_PASSWORD:
+        raise ValueError(
+            "Configure EMAIL_SENDER e EMAIL_PASSWORD no Railway.\n"
+            "Use uma senha de app do Gmail: "
+            "myaccount.google.com/security → Senhas de app"
+        )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = assunto
+    msg["From"]    = EMAIL_SENDER
+    msg["To"]      = destinatario
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+        smtp.starttls()
+        smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        smtp.sendmail(EMAIL_SENDER, destinatario, msg.as_string())
 
 
 def _formatar_cnpj(cnpj: str) -> str:
