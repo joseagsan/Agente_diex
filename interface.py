@@ -988,303 +988,251 @@ def _form_nc():
 
 
 # ── Requisições ───────────────────────────────────────────────────────────────
-def page_reqs(reqs, ncs):
+def page_reqs(reqs_legado, ncs):
+    """Página de Requisições — usa SSAC_REQS (nova aba limpa)."""
+    import streamlit.components.v1 as components
+    from reqs_crud import ler_reqs, atualizar_req, itens_da_req
+    from sheets_nc import atualizar_nc_empenhado, recalcular_empenhados
+
+    reqs = ler_reqs()
+
     st.title("📝 Requisições")
 
-    def _badge_req(sit):
-        return {"Pendente": "🟡", "Enviada": "🔵", "Aprovada": "🟠",
-                "Empenhada": "🟢", "Anulado": "🔴", "Liquidada": "🟣",
-                "Paga": "⚪"}.get(sit, "⚪")
+    def _badge(sit):
+        return {"Pendente": "🟡", "Empenhada": "🟢", "Anulado": "🔴",
+                "Enviada": "🔵", "Aprovada": "🟠"}.get(sit, "⚪")
 
-    # ── KPIs globais ──────────────────────────────────────────────────
-    total_geral   = sum(parse(r.get("VALOR", 0)) for r in reqs)
-    n_pendentes   = sum(1 for r in reqs if r.get("SITUAÇÃO") == "Pendente")
-    n_empenhadas  = sum(1 for r in reqs if r.get("SITUAÇÃO") == "Empenhada")
-    n_anuladas    = sum(1 for r in reqs if r.get("SITUAÇÃO") == "Anulado")
-    val_emp       = sum(parse(r.get("VALOR", 0)) for r in reqs if r.get("SITUAÇÃO") == "Empenhada")
+    def _val(r): return parse(r.get("VALOR", "0"))
+
+    # ── KPIs ──────────────────────────────────────────────────────────
+    total_geral  = sum(_val(r) for r in reqs)
+    n_pend       = sum(1 for r in reqs if r.get("SITUACAO") == "Pendente")
+    n_emp        = sum(1 for r in reqs if r.get("SITUACAO") == "Empenhada")
+    n_anul       = sum(1 for r in reqs if r.get("SITUACAO") == "Anulado")
+    val_emp      = sum(_val(r) for r in reqs if r.get("SITUACAO") == "Empenhada")
 
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("📋 Total REQs",   len(reqs))
-    k2.metric("💰 Valor Total",  fmt(total_geral))
-    k3.metric("⏳ Pendentes",    n_pendentes)
-    k4.metric("🟢 Empenhadas",   n_empenhadas,  delta=fmt(val_emp), delta_color="off")
-    k5.metric("🔴 Anuladas",     n_anuladas)
+    k1.metric("📋 Total REQs",  len(reqs))
+    k2.metric("💰 Valor Total", fmt(total_geral))
+    k3.metric("⏳ Pendentes",   n_pend)
+    k4.metric("🟢 Empenhadas",  n_emp, delta=fmt(val_emp), delta_color="off")
+    k5.metric("🔴 Anuladas",    n_anul)
 
     st.divider()
 
     # ── Filtros rápidos ────────────────────────────────────────────────
     fc1, fc2 = st.columns([3, 2])
-    busca = fc1.text_input("Busca", placeholder="🔍 REQ, NC, Empresa, NE...",
+    busca = fc1.text_input("Busca", placeholder="🔍 REQ, NC, Empresa...",
                            key="req_busca", label_visibility="collapsed")
     status_opt = fc2.radio("Status", ["Todos", "🟡 Pendente", "🟢 Empenhada", "🔴 Anulado"],
                            horizontal=True, key="req_status", label_visibility="collapsed")
 
     with st.expander("🔧 Filtros avançados"):
-        fa1, fa2, fa3, fa4 = st.columns(4)
-        f_emp  = fa1.multiselect("Empresa", sorted({r.get("EMPRESA", "") for r in reqs if r.get("EMPRESA")}))
-        f_nc   = fa2.multiselect("NC",      sorted({r.get("NC", "")      for r in reqs if r.get("NC")}))
-        f_tipo = fa3.multiselect("Tipo",    ["Ordinário", "Especial", "Anulação"])
-        f_pi   = fa4.multiselect("PI",      sorted({r.get("PI", "")      for r in reqs if r.get("PI")}))
+        fa1, fa2, fa3 = st.columns(3)
+        f_emp = fa1.multiselect("Empresa", sorted({r.get("EMPRESA","") for r in reqs if r.get("EMPRESA")}))
+        f_nc  = fa2.multiselect("NC",      sorted({r.get("NC","")      for r in reqs if r.get("NC")}))
+        f_pi  = fa3.multiselect("PI",      sorted({r.get("PI","")      for r in reqs if r.get("PI")}))
 
-    # ── Aplicar filtros ────────────────────────────────────────────────
     filtradas = []
     for r in reqs:
-        sit = r.get("SITUAÇÃO", "")
+        sit = r.get("SITUACAO", "")
         if status_opt == "🟡 Pendente"  and sit != "Pendente":  continue
         if status_opt == "🟢 Empenhada" and sit != "Empenhada": continue
         if status_opt == "🔴 Anulado"   and sit != "Anulado":   continue
-        if f_emp  and r.get("EMPRESA") not in f_emp:  continue
-        if f_nc   and r.get("NC")      not in f_nc:   continue
-        if f_tipo and r.get("TIPO")    not in f_tipo: continue
-        if f_pi   and r.get("PI")      not in f_pi:   continue
+        if f_emp and r.get("EMPRESA") not in f_emp: continue
+        if f_nc  and r.get("NC")      not in f_nc:  continue
+        if f_pi  and r.get("PI")      not in f_pi:  continue
         if busca:
             hay = " ".join(str(v) for v in r.values()).lower()
             if busca.lower() not in hay: continue
         filtradas.append(r)
 
-    # ── Barra de ações ─────────────────────────────────────────────────
-    ac1, ac2, ac3, ac4 = st.columns([1, 1, 1, 3])
+    # ── Ações ──────────────────────────────────────────────────────────
+    ac1, ac2, ac3 = st.columns([1, 1, 4])
     if ac1.button("➕ Nova REQ", type="primary", use_container_width=True):
         st.session_state["form_req"] = not st.session_state.get("form_req", False)
-    ac2.markdown(
-        f'<a href="{LINK_SHEETS}" target="_blank">'
-        f'<button style="background:transparent;color:#64748b;border:1px solid #334155;'
-        f'border-radius:6px;padding:8px 12px;font-size:.85rem;cursor:pointer;width:100%;">'
-        f'📊 Planilha</button></a>', unsafe_allow_html=True)
-    if ac3.button("🔄 Recalcular NCs", use_container_width=True,
-                  help="Atualiza EMPENHADO nas NCs com base nas REQs"):
+    if ac2.button("🔄 Recalcular NCs", use_container_width=True):
         with st.spinner("Recalculando..."):
             try:
-                from sheets_nc import recalcular_empenhados
                 resultado = recalcular_empenhados(reqs)
                 carregar(forcar=True)
-                msgs = [f"**{nc}**: {msg}" for nc, msg in resultado.items()]
-                st.success("✅ " + " | ".join(msgs) if msgs else "Nenhuma REQ empenhada.")
+                msgs = [f"**{k}**: {v}" for k, v in resultado.items()]
+                st.success("✅ " + " | ".join(msgs) if msgs else "Sem REQs empenhadas.")
             except Exception as e:
                 st.error(f"Erro: {e}")
-
-    total_f = sum(parse(r.get("VALOR", 0)) for r in filtradas)
-    ac4.info(f"**{len(filtradas)}** de {len(reqs)} REQs · Total filtrado: **{fmt(total_f)}**")
+    total_f = sum(_val(r) for r in filtradas)
+    ac3.info(f"**{len(filtradas)}** de {len(reqs)} REQs · **{fmt(total_f)}**")
 
     if st.session_state.get("form_req"):
-        _form_req(ncs)
-
-    # ── Consulta de saldo por NC ──────────────────────────────────────
-    st.divider()
-    with st.expander("🔎 Consultar saldo de uma NC", expanded=False):
-        ncs_disponiveis = sorted({r.get("NC", "") for r in reqs if r.get("NC")})
-        nc_consulta = st.selectbox("Selecione a NC", [""] + ncs_disponiveis,
-                                   key="req_nc_consulta", label_visibility="collapsed",
-                                   placeholder="Escolha uma NC...")
-        if nc_consulta:
-            nc_d = next((n for n in ncs if n.get("NC") == nc_consulta), {})
-            recebido = parse(nc_d.get("RECEBIDO", 0))
-
-            # Soma de TODAS as REQs da NC (exceto anuladas)
-            reqs_nc = [r for r in reqs
-                       if r.get("NC") == nc_consulta
-                       and r.get("SITUAÇÃO") not in ("Anulado",)]
-            total_reqs  = sum(parse(r.get("VALOR", 0)) for r in reqs_nc)
-            saldo_disp  = max(0.0, recebido - total_reqs)
-
-            # Por situação
-            val_pend = sum(parse(r.get("VALOR", 0)) for r in reqs_nc if r.get("SITUAÇÃO") == "Pendente")
-            val_emp  = sum(parse(r.get("VALOR", 0)) for r in reqs_nc if r.get("SITUAÇÃO") == "Empenhada")
-            val_out  = total_reqs - val_pend - val_emp
-
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("💰 Recebido",      fmt(recebido))
-            c2.metric("📋 Total REQs",    fmt(total_reqs),
-                      delta=f"{len(reqs_nc)} req(s)", delta_color="off")
-            c3.metric("🟢 Saldo disponível", fmt(saldo_disp),
-                      delta="OK" if saldo_disp >= 0 else "⚠️ Excede",
-                      delta_color="normal" if saldo_disp >= 0 else "inverse")
-            c4.metric("⏳ Pendentes",     fmt(val_pend))
-
-            if recebido > 0:
-                pct_usado = min(100.0, total_reqs / recebido * 100)
-                st.progress(pct_usado / 100,
-                            text=f"{pct_usado:.1f}% comprometido — {fmt(total_reqs)} de {fmt(recebido)}")
-
-            if reqs_nc:
-                df_nc = pd.DataFrame([{
-                    "REQ":      r.get("REQ", ""),
-                    "Empresa":  r.get("EMPRESA", ""),
-                    "Valor":    fmt(parse(r.get("VALOR", 0))),
-                    "Situação": r.get("SITUAÇÃO", ""),
-                } for r in reqs_nc])
-                st.dataframe(df_nc, use_container_width=True, hide_index=True)
+        _form_req_novo(ncs)
 
     if not filtradas:
-        st.info("Nenhuma REQ encontrada com os filtros aplicados.")
+        st.info("Nenhuma REQ encontrada.")
         return
 
     # ── Tabela ────────────────────────────────────────────────────────
     rows = []
     for r in filtradas:
-        valor_num = parse(r.get("VALOR", 0))
-        link = r.get("ARQUIVO REQ", "")
         rows.append({
-            "":              _badge_req(r.get("SITUAÇÃO", "")),
-            "REQ":           r.get("REQ", ""),
-            "DATA REQ":      r.get("DATA REQ", ""),
-            "NC":            r.get("NC", ""),
-            "PI":            r.get("PI", ""),
-            "EMPRESA":       r.get("EMPRESA", ""),
-            "DESCRIÇÃO":     r.get("DESCRIÇÃO", "")[:60],
-            "VALOR":         fmt(valor_num) if valor_num else r.get("VALOR", ""),
-            "SITUAÇÃO":      r.get("SITUAÇÃO", ""),
-            "ENTRADA NA BDA": r.get("ENTRADA NA BDA", ""),
-            "NE":            r.get("NE", ""),
-            "OBS":           r.get("OBS", ""),
-            "📄":            link if link and link.startswith("http") else "",
+            "":           _badge(r.get("SITUACAO", "")),
+            "REQ":        r.get("REQ", ""),
+            "DATA":       r.get("DATA", ""),
+            "NC":         r.get("NC", ""),
+            "NE":         r.get("NE", ""),
+            "PI":         r.get("PI", ""),
+            "EMPRESA":    r.get("EMPRESA", ""),
+            "VALOR":      fmt(_val(r)),
+            "SITUACAO":   r.get("SITUACAO", ""),
+            "ENTRADA":    r.get("ENTRADA_SALC", ""),
+            "OBS":        r.get("OBS", ""),
         })
 
-    df_r = pd.DataFrame(rows)
+    df_r   = pd.DataFrame(rows)
     edited = st.data_editor(
-        df_r,
-        use_container_width=True,
-        hide_index=True,
+        df_r, use_container_width=True, hide_index=True,
         column_config={
-            "":               st.column_config.TextColumn("",             width=35,  disabled=True),
-            "REQ":            st.column_config.TextColumn("REQ",          width=60,  disabled=True),
-            "DATA REQ":       st.column_config.TextColumn("Data",         width=90,  disabled=True),
-            "NC":             st.column_config.TextColumn("NC",           width=120, disabled=True),
-            "PI":             st.column_config.TextColumn("PI",           width=70,  disabled=True),
-            "EMPRESA":        st.column_config.TextColumn("Empresa",      width=160, disabled=True),
-            "DESCRIÇÃO":      st.column_config.TextColumn("Descrição",    width=200, disabled=True),
-            "VALOR":          st.column_config.TextColumn("Valor",        width=120, disabled=True),
-            "SITUAÇÃO":       st.column_config.SelectboxColumn(
-                                  "Situação", width=110,
-                                  options=["Pendente", "Empenhada", "Anulado"]),
-            "ENTRADA NA BDA": st.column_config.TextColumn("Entrada SALC", width=110),
-            "NE":             st.column_config.TextColumn("NE",           width=90),
-            "OBS":            st.column_config.TextColumn("Obs",          width=120, disabled=True),
-            "📄":             st.column_config.LinkColumn("REQ",          width=70,  disabled=True,
-                                  display_text="📄 Ver"),
+            "":        st.column_config.TextColumn("",        width=35,  disabled=True),
+            "REQ":     st.column_config.TextColumn("REQ",     width=65,  disabled=True),
+            "DATA":    st.column_config.TextColumn("Data",    width=90,  disabled=True),
+            "NC":      st.column_config.TextColumn("NC",      width=130, disabled=True),
+            "NE":      st.column_config.TextColumn("NE",      width=90),
+            "PI":      st.column_config.TextColumn("PI",      width=70,  disabled=True),
+            "EMPRESA": st.column_config.TextColumn("Empresa", width=170, disabled=True),
+            "VALOR":   st.column_config.TextColumn("Valor",   width=120, disabled=True),
+            "SITUACAO":st.column_config.SelectboxColumn("Situação", width=110,
+                           options=["Pendente", "Empenhada", "Anulado"]),
+            "ENTRADA": st.column_config.TextColumn("Entrada SALC", width=110),
+            "OBS":     st.column_config.TextColumn("Obs",     width=120, disabled=True),
         },
-        key="req_editor",
+        key="req_editor_novo",
     )
 
-    # Detecta mudanças e oferece salvar
-    changed_rows = []
+    # Detecta e salva alterações
+    changed = []
     for i, (orig, novo) in enumerate(zip(rows, edited.to_dict("records"))):
-        if (orig["SITUAÇÃO"]        != novo["SITUAÇÃO"] or
-            orig["ENTRADA NA BDA"]  != novo["ENTRADA NA BDA"] or
-            orig["NE"]              != novo["NE"]):
-            # Busca NC e valor no registro original filtrado
+        if orig["SITUACAO"] != novo["SITUACAO"] or orig["ENTRADA"] != novo["ENTRADA"] or orig["NE"] != novo["NE"]:
             req_orig = filtradas[i] if i < len(filtradas) else {}
-            changed_rows.append({
-                "req":     orig["REQ"],
-                "sit":     novo["SITUAÇÃO"],
-                "sit_ant": orig["SITUAÇÃO"],
-                "entrada": novo["ENTRADA NA BDA"],
-                "ne":      novo["NE"],
-                "nc":      req_orig.get("NC", ""),
-                "valor":   parse(req_orig.get("VALOR", 0)),
-            })
+            changed.append({"req": orig["REQ"], "sit": novo["SITUACAO"],
+                             "sit_ant": orig["SITUACAO"], "entrada": novo["ENTRADA"],
+                             "ne": novo["NE"], "nc": req_orig.get("NC",""),
+                             "valor": _val(req_orig)})
 
-    if changed_rows:
-        st.info(f"✏️ {len(changed_rows)} linha(s) alterada(s). Clique para salvar.")
+    if changed:
+        st.info(f"✏️ {len(changed)} linha(s) alterada(s).")
         if st.button("💾 Salvar alterações", type="primary", key="btn_salvar_reqs"):
             try:
-                from sheets_nc import atualizar_req, atualizar_nc_empenhado
-                for c in changed_rows:
+                for c in changed:
                     atualizar_req(c["req"], c["sit"], c["entrada"], c["ne"])
-                    nc, valor = c["nc"], c["valor"]
-                    if not nc or not valor:
-                        continue
-                    # Empenhada: diminui saldo da NC (adiciona ao empenhado)
-                    if c["sit"] == "Empenhada" and c["sit_ant"] != "Empenhada":
-                        try:
-                            atualizar_nc_empenhado(nc, valor)
-                        except Exception as e_nc:
-                            st.warning(f"REQ salva, saldo NC não atualizado: {e_nc}")
-                    # Anulado: aumenta saldo da NC (subtrai do empenhado)
-                    elif c["sit"] == "Anulado" and c["sit_ant"] != "Anulado":
-                        try:
-                            atualizar_nc_empenhado(nc, -valor)
-                        except Exception as e_nc:
-                            st.warning(f"REQ salva, saldo NC não atualizado: {e_nc}")
+                    nc, val = c["nc"], c["valor"]
+                    if nc and val:
+                        if c["sit"] == "Empenhada" and c["sit_ant"] != "Empenhada":
+                            try: atualizar_nc_empenhado(nc, val)
+                            except Exception as e: st.warning(f"NC não atualizada: {e}")
+                        elif c["sit"] == "Anulado" and c["sit_ant"] != "Anulado":
+                            try: atualizar_nc_empenhado(nc, -val)
+                            except Exception as e: st.warning(f"NC não atualizada: {e}")
                 carregar(forcar=True)
-                st.success("✅ Alterações salvas!")
+                st.success("✅ Salvo!")
                 st.rerun()
             except Exception as e:
-                st.error(f"Erro ao salvar: {e}")
+                st.error(f"Erro: {e}")
 
-    # ── Visualizador de REQs ───────────────────────────────────────────
+    # ── Consulta de saldo por NC ──────────────────────────────────────
     st.divider()
-    st.subheader("📄 Visualizar REQ Salva")
-    try:
-        from sheets_nc import listar_reqs_com_html, ler_html_req
-        reqs_salvas = listar_reqs_com_html()
-    except Exception:
-        reqs_salvas = []
+    with st.expander("🔎 Consultar saldo de uma NC", expanded=False):
+        ncs_nc = sorted({r.get("NC","") for r in reqs if r.get("NC")})
+        nc_q   = st.selectbox("NC", [""] + ncs_nc, key="req_nc_q", label_visibility="collapsed")
+        if nc_q:
+            nc_d    = next((n for n in ncs if n.get("NC") == nc_q), {})
+            receb   = parse(nc_d.get("RECEBIDO", 0))
+            reqs_nc = [r for r in reqs if r.get("NC") == nc_q and r.get("SITUACAO") != "Anulado"]
+            t_reqs  = sum(_val(r) for r in reqs_nc)
+            saldo   = max(0.0, receb - t_reqs)
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("💰 Recebido", fmt(receb))
+            c2.metric("📋 Total REQs", fmt(t_reqs), delta=f"{len(reqs_nc)} req(s)", delta_color="off")
+            c3.metric("🟢 Saldo", fmt(saldo), delta="OK" if saldo >= 0 else "⚠️",
+                      delta_color="normal" if saldo >= 0 else "inverse")
+            c4.metric("⏳ Pendentes", fmt(sum(_val(r) for r in reqs_nc if r.get("SITUACAO")=="Pendente")))
+            if receb > 0:
+                st.progress(min(1.0, t_reqs/receb), text=f"{t_reqs/receb*100:.1f}% comprometido")
 
-    if not reqs_salvas:
-        st.caption("Nenhuma REQ salva ainda — gere e cadastre uma REQ para ela aparecer aqui.")
+    # ── Visualizador de HTML ──────────────────────────────────────────
+    st.divider()
+    st.subheader("📄 Visualizar REQ")
+    reqs_com_html = [r.get("REQ","") for r in reqs if r.get("REQ")]
+    if not reqs_com_html:
+        st.caption("Nenhuma REQ cadastrada ainda.")
     else:
-        import streamlit.components.v1 as components
-        col_sel, col_btn = st.columns([3, 1])
-        req_vis = col_sel.selectbox("REQ para visualizar", reqs_salvas,
-                                    key="vis_req_sel", label_visibility="collapsed")
-        if col_btn.button("📄 Visualizar", type="primary", use_container_width=True, key="btn_vis_req"):
-            with st.spinner("Carregando..."):
-                st.session_state["vis_req_html"] = ler_html_req(req_vis)
+        cv1, cv2 = st.columns([3,1])
+        req_vis = cv1.selectbox("REQ", reqs_com_html, key="vis_req_sel",
+                                label_visibility="collapsed")
+        if cv2.button("📄 Visualizar", type="primary", use_container_width=True, key="btn_vis"):
+            with st.spinner("Gerando visualização..."):
+                from gerador_req_html import gerar_html_req
+                r_data   = next((r for r in reqs if r.get("REQ") == req_vis), {})
+                itens    = itens_da_req(req_vis)
+                campos_v = {
+                    "requisition_id":  r_data.get("REQ",""),
+                    "LOCAL_DATA":      r_data.get("DATA",""),
+                    "UG":              r_data.get("PI",""),
+                    "OM":              OM_PADRAO,
+                    "FORNECEDOR_NOME": r_data.get("EMPRESA",""),
+                    "FORNECEDOR_CNPJ": r_data.get("CNPJ",""),
+                    "MODALIDADE":      r_data.get("PREGAO",""),
+                    "DADOS_NC":        r_data.get("NC",""),
+                    "NE":              r_data.get("NE",""),
+                    "PI":              r_data.get("PI",""),
+                    "ND":              r_data.get("ND",""),
+                    "TIPO":            r_data.get("TIPO","Ordinário"),
+                    "TOTAL":           fmt(_val(r_data)),
+                }
+                st.session_state["vis_req_html"] = gerar_html_req(campos_v, itens)
                 st.session_state["vis_req_num"]  = req_vis
 
-        html_vis = st.session_state.get("vis_req_html", "")
-        num_vis  = st.session_state.get("vis_req_num", "")
-        if html_vis:
-            st.success(f"📄 REQ {num_vis}")
-            components.html(html_vis, height=820, scrolling=True)
+        html_v = st.session_state.get("vis_req_html","")
+        if html_v:
+            st.success(f"📄 REQ {st.session_state.get('vis_req_num','')}")
+            components.html(html_v, height=820, scrolling=True)
 
 
 def _form_req(ncs):
+    _form_req_novo(ncs)
+
+
+def _form_req_novo(ncs):
+    from reqs_crud import adicionar_req as adicionar_req_novo
     st.divider()
 
-    # ── Seleção do tipo de requisição (fora do form para reatividade)
-    tipo_req = st.radio(
-        "Tipo de Requisição",
-        ["📋 Requisição de Empenho", "🔴 Requisição de Anulação"],
-        horizontal=True,
-        key="_frq_tipo_radio",
-        label_visibility="collapsed",
-    )
-    eh_anulacao = tipo_req == "🔴 Requisição de Anulação"
-
+    tipo_req    = st.radio("Tipo", ["📋 Empenho", "🔴 Anulação"], horizontal=True,
+                           key="_frq_tipo2", label_visibility="collapsed")
+    eh_anulacao = "Anulação" in tipo_req
     if eh_anulacao:
-        st.error("⚠️ **Requisição de Anulação** — ao emitir esta requisição o saldo da NC será **devolvido/aumentado**.")
-        st.subheader("🔴 Nova Requisição de Anulação")
-    else:
-        st.subheader("📋 Nova Requisição de Empenho")
+        st.error("⚠️ **Anulação** — saldo da NC será devolvido.")
 
-    # NC fora do form → PI preenche reativamente
-    nums_nc = [""] + [nc.get("NC", "") for nc in ncs if nc.get("NC")]
-    nc_sel  = st.selectbox("NC Vinculada *", nums_nc, key="_frq_nc_sel")
+    nums_nc = [""] + [nc.get("NC","") for nc in ncs if nc.get("NC")]
+    nc_sel  = st.selectbox("NC Vinculada", nums_nc, key="_frq_nc2")
     nc_d    = next((nc for nc in ncs if nc.get("NC") == nc_sel), {}) if nc_sel else {}
-
     if nc_d:
-        st.info(f"📋 **{nc_sel}** · {nc_d.get('ORGÃO','')} · PI: {nc_d.get('PI','')} · Saldo: {nc_d.get('SALDO NC','')}")
+        st.info(f"📋 **{nc_sel}** · PI: {nc_d.get('PI','')} · ND: {nc_d.get('ND','')}")
 
-    with st.form("f_req", clear_on_submit=True):
+    with st.form("f_req_novo", clear_on_submit=True):
         c1, c2 = st.columns(2)
-        req_num      = c1.text_input("Número REQ")
-        data_req     = c1.date_input("Data REQ", value=date.today())
-        empresa      = c1.text_input("Empresa *")
-        entrada_salc = c1.date_input("Entrada na SALC", value=None)
+        req_num  = c1.text_input("Nº REQ")
+        data_req = c1.date_input("Data", value=date.today())
+        empresa  = c1.text_input("Empresa *")
+        cnpj     = c1.text_input("CNPJ")
 
-        pi       = c2.text_input("PI", value=nc_d.get("PI", ""))
-        tipo     = c2.selectbox("Tipo",
-                                ["Anulação"] if eh_anulacao else ["Ordinário", "Especial"])
-        ne       = c2.text_input("NE")
-        sit_opts = ["Anulado"] + [s for s in SITUACOES_REQ if s != "Anulado"] if eh_anulacao else SITUACOES_REQ
-        situacao = c2.selectbox("Situação", sit_opts)
+        ne      = c2.text_input("NE")
+        tipo    = c2.selectbox("Tipo", ["Anulação"] if eh_anulacao else ["Ordinário","Especial"])
+        sit_def = "Anulado" if eh_anulacao else "Pendente"
+        sit_idx = 0
+        situacao = c2.selectbox("Situação", ["Pendente","Empenhada","Anulado"], index=["Pendente","Empenhada","Anulado"].index(sit_def))
+        entrada  = c2.date_input("Entrada SALC", value=None)
+        obs      = c2.text_input("Obs")
 
-        finalidade = st.text_area("Finalidade", value=nc_d.get("FINALIDADE", ""))
-        descricao  = st.text_area("Descrição *")
-        valor = st.number_input("Valor (R$) *", min_value=0.0, step=0.01, format="%.2f")
-        obs   = st.text_input("Observações")
+        valor  = st.number_input("Valor (R$) *", min_value=0.0, step=0.01, format="%.2f")
+        desc   = st.text_area("Descrição *")
 
         s1, s2 = st.columns(2)
         salvar   = s1.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
@@ -1295,30 +1243,29 @@ def _form_req(ncs):
             st.rerun()
 
         if salvar:
-            if not empresa or not descricao or valor <= 0:
+            if not empresa or not desc or valor <= 0:
                 st.error("Preencha Empresa, Descrição e Valor.")
             else:
                 try:
-                    entrada_str = entrada_salc.strftime("%d/%m/%Y") if entrada_salc else ""
-                    from sheets_nc import adicionar_req
-                    adicionar_req({
-                        "REQ":            req_num,
-                        "NC":             nc_sel,
-                        "DATA REQ":       data_req.strftime("%d/%m/%Y"),
-                        "PI":             pi or nc_d.get("PI", ""),
-                        "FINALIDADE":     finalidade,
-                        "TIPO":           tipo,
-                        "EMPRESA":        empresa,
-                        "DESCRIÇÃO":      descricao,
-                        "VALOR":          valor,
-                        "SITUAÇÃO":       situacao,
-                        "NE":             ne,
-                        "ENTRADA NA BDA": entrada_str,
-                        "OBS":            obs,
+                    adicionar_req_novo({
+                        "REQ":          req_num,
+                        "DATA":         data_req.strftime("%d/%m/%Y"),
+                        "NC":           nc_sel,
+                        "NE":           ne,
+                        "PI":           nc_d.get("PI",""),
+                        "ND":           nc_d.get("ND",""),
+                        "EMPRESA":      empresa,
+                        "CNPJ":         cnpj,
+                        "PREGAO":       "",
+                        "TIPO":         tipo,
+                        "VALOR":        valor,
+                        "SITUACAO":     situacao,
+                        "ENTRADA_SALC": entrada.strftime("%d/%m/%Y") if entrada else "",
+                        "OBS":          obs,
+                        "ITENS":        [],
                     })
-                    st.success("✅ REQ adicionada!")
+                    st.success("✅ REQ cadastrada!")
                     st.session_state["form_req"] = False
-                    carregar(forcar=True)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro: {e}")
@@ -2193,40 +2140,30 @@ def page_gerar_req(reqs, ncs):
             st.info("📋 Deseja cadastrar esta requisição na planilha?")
             cad1, cad2 = st.columns(2)
             if cad1.button("✅ Sim, cadastrar", type="primary", use_container_width=True, key="btn_cad_sim"):
-                from sheets_nc import adicionar_req, salvar_html_req
-                cf        = st.session_state["_doc_campos"]
-                itens_lim = st.session_state.get("_doc_itens_limpos", [])
-                req_num   = cf.get("requisition_id", "")
-                desc      = "; ".join(i.get("DESCRICAO_ITEM","")[:40] for i in itens_lim[:3])
-
-                # 1. Salva HTML (não bloqueia o cadastro se falhar)
-                html_bytes = st.session_state.get("_doc_html_bytes", b"")
-                if html_bytes:
-                    try:
-                        salvar_html_req(req_num, html_bytes.decode("utf-8"))
-                    except Exception as e_html:
-                        st.warning(f"⚠️ HTML não salvo na planilha: {e_html}")
-
-                # 2. Cadastra REQ na planilha
                 try:
-                    adicionar_req({
-                        "REQ":        req_num,
-                        "NE":         cf.get("NE", ""),
-                        "NC":         st.session_state.get("gerar_nc_sel", ""),
-                        "PI":         cf.get("PI", ""),
-                        "FINALIDADE": cf.get("ASSUNTO", ""),
-                        "TIPO":       cf.get("TIPO", "Ordinário"),
-                        "EMPRESA":    cf.get("FORNECEDOR_NOME", ""),
-                        "DESCRIÇÃO":  desc,
-                        "VALOR":      st.session_state.get("_doc_total", 0.0),
-                        "SITUAÇÃO":   "Pendente",
-                        "ARQUIVO REQ": f"REQ_{req_num}",
+                    from reqs_crud import adicionar_req as adicionar_req_novo
+                    cf        = st.session_state["_doc_campos"]
+                    itens_lim = st.session_state.get("_doc_itens_limpos", [])
+                    req_num   = cf.get("requisition_id", "")
+                    adicionar_req_novo({
+                        "REQ":     req_num,
+                        "DATA":    cf.get("LOCAL_DATA", date.today().strftime("%d/%m/%Y")),
+                        "NC":      st.session_state.get("gerar_nc_sel", ""),
+                        "NE":      cf.get("NE", ""),
+                        "PI":      cf.get("PI", ""),
+                        "ND":      cf.get("ND", ""),
+                        "EMPRESA": cf.get("FORNECEDOR_NOME", ""),
+                        "CNPJ":    cf.get("FORNECEDOR_CNPJ", ""),
+                        "PREGAO":  cf.get("MODALIDADE", ""),
+                        "TIPO":    cf.get("TIPO", "Ordinário"),
+                        "VALOR":   st.session_state.get("_doc_total", 0.0),
+                        "SITUACAO": "Pendente",
+                        "ITENS":   itens_lim,
                     })
-                    carregar(forcar=True)
                     st.session_state["_doc_req_cadastrada"] = True
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Erro ao cadastrar REQ na planilha: {e}")
+                    st.error(f"Erro ao cadastrar: {e}")
             if cad2.button("✖ Não", use_container_width=True, key="btn_cad_nao"):
                 st.session_state["_doc_req_cadastrada"] = True
                 st.rerun()
