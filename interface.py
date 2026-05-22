@@ -1091,21 +1091,22 @@ def page_reqs(reqs_legado, ncs):
             "OBS":        r.get("OBS", ""),
         })
 
-    # Botões de ação por linha (acima da tabela)
-    st.caption("Selecione uma REQ para editar ou apagar:")
-    sel_cols = st.columns([2, 1, 1, 6])
-    req_selecionada = sel_cols[0].selectbox("REQ", [r.get("REQ","") for r in filtradas],
-                                             key="req_sel_acao", label_visibility="collapsed")
-    if sel_cols[1].button("✏️ Editar", use_container_width=True, key="btn_editar_req"):
-        st.session_state["edit_req_num"] = req_selecionada
-        st.rerun()
-    if sel_cols[2].button("🗑️ Apagar", use_container_width=True, key="btn_apagar_req"):
-        if req_selecionada:
-            from reqs_crud import excluir_req
-            excluir_req(req_selecionada)
-            st.success(f"✅ REQ {req_selecionada} apagada.")
+    # ── Lista com ações por linha ──────────────────────────────────────
+    from reqs_crud import excluir_req as _excluir
+    for ridx, row in enumerate(rows):
+        ca, cb, cc, cd, ce = st.columns([1, 2, 5, 1, 1])
+        ca.markdown(row[""])
+        cb.markdown(f"**{row['REQ']}** — {row['DATA']}")
+        cc.markdown(f"{row['EMPRESA']} | {row['NC']} | {row['VALOR']} | {row['SITUACAO']}")
+        if cd.button("✏️", key=f"edit_{ridx}", help="Editar"):
+            st.session_state["edit_req_num"] = row["REQ"]
+            st.rerun()
+        if ce.button("🗑️", key=f"del_{ridx}", help="Apagar"):
+            _excluir(row["REQ"])
             st.rerun()
 
+    st.divider()
+    st.caption("Tabela completa (edite Situação, Entrada SALC e NE diretamente):")
     df_r   = pd.DataFrame(rows)
     edited = st.data_editor(
         df_r, use_container_width=True, hide_index=True,
