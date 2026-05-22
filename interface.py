@@ -1212,6 +1212,33 @@ def page_reqs(reqs, ncs):
             except Exception as e:
                 st.error(f"Erro ao salvar: {e}")
 
+    # ── Visualizador de REQs ───────────────────────────────────────────
+    st.divider()
+    st.subheader("📄 Visualizar REQ Salva")
+    try:
+        from sheets_nc import listar_reqs_com_html, ler_html_req
+        reqs_salvas = listar_reqs_com_html()
+    except Exception:
+        reqs_salvas = []
+
+    if not reqs_salvas:
+        st.caption("Nenhuma REQ salva ainda — gere e cadastre uma REQ para ela aparecer aqui.")
+    else:
+        import streamlit.components.v1 as components
+        col_sel, col_btn = st.columns([3, 1])
+        req_vis = col_sel.selectbox("REQ para visualizar", reqs_salvas,
+                                    key="vis_req_sel", label_visibility="collapsed")
+        if col_btn.button("📄 Visualizar", type="primary", use_container_width=True, key="btn_vis_req"):
+            with st.spinner("Carregando..."):
+                st.session_state["vis_req_html"] = ler_html_req(req_vis)
+                st.session_state["vis_req_num"]  = req_vis
+
+        html_vis = st.session_state.get("vis_req_html", "")
+        num_vis  = st.session_state.get("vis_req_num", "")
+        if html_vis:
+            st.success(f"📄 REQ {num_vis}")
+            components.html(html_vis, height=820, scrolling=True)
+
 
 def _form_req(ncs):
     st.divider()
@@ -2167,11 +2194,17 @@ def page_gerar_req(reqs, ncs):
             cad1, cad2 = st.columns(2)
             if cad1.button("✅ Sim, cadastrar", type="primary", use_container_width=True, key="btn_cad_sim"):
                 try:
-                    from sheets_nc import adicionar_req
-                    cf      = st.session_state["_doc_campos"]
+                    from sheets_nc import adicionar_req, salvar_html_req
+                    cf        = st.session_state["_doc_campos"]
                     itens_lim = st.session_state.get("_doc_itens_limpos", [])
-                    req_num = cf.get("requisition_id", "")
-                    desc    = "; ".join(i.get("DESCRICAO_ITEM","")[:40] for i in itens_lim[:3])
+                    req_num   = cf.get("requisition_id", "")
+                    desc      = "; ".join(i.get("DESCRICAO_ITEM","")[:40] for i in itens_lim[:3])
+
+                    # Salva HTML na planilha
+                    html_bytes = st.session_state.get("_doc_html_bytes", b"")
+                    if html_bytes:
+                        salvar_html_req(req_num, html_bytes.decode("utf-8"))
+
                     adicionar_req({
                         "REQ":        req_num,
                         "NE":         cf.get("NE", ""),
@@ -2183,7 +2216,7 @@ def page_gerar_req(reqs, ncs):
                         "DESCRIÇÃO":  desc,
                         "VALOR":      st.session_state.get("_doc_total", 0.0),
                         "SITUAÇÃO":   "Pendente",
-                        "ARQUIVO REQ": "",
+                        "ARQUIVO REQ": f"REQ_{req_num}",
                     })
                     carregar(forcar=True)
                     st.session_state["_doc_req_cadastrada"] = True

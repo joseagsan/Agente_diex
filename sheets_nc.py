@@ -544,6 +544,56 @@ def adicionar_frase(tipo: str, texto: str) -> None:
     logger.info("Frase adicionada: %s", tipo)
 
 
+def salvar_html_req(req_num: str, html: str) -> None:
+    """Salva o HTML da REQ na aba ARQUIVO_HTML da planilha."""
+    client   = _conectar()
+    planilha = client.open_by_key(SHEET_ID_NC)
+    try:
+        ws = planilha.worksheet("ARQUIVO_HTML")
+    except Exception:
+        ws = planilha.add_worksheet(title="ARQUIVO_HTML", rows=500, cols=2)
+        ws.append_row(["REQ", "HTML"])
+
+    # Remove versão anterior se existir
+    todos = ws.get_all_values()
+    for i, row in enumerate(todos[1:], start=2):
+        if row and str(row[0]).strip() == str(req_num).strip():
+            ws.delete_rows(i)
+            break
+
+    # Limita a ~45k chars para não exceder limite da célula
+    html_truncado = html[:45000] if len(html) > 45000 else html
+    ws.append_row([str(req_num), html_truncado], value_input_option="RAW")
+    logger.info("HTML REQ %s salvo na planilha.", req_num)
+
+
+def ler_html_req(req_num: str) -> str:
+    """Lê o HTML de uma REQ salvo na planilha."""
+    client   = _conectar()
+    planilha = client.open_by_key(SHEET_ID_NC)
+    try:
+        ws   = planilha.worksheet("ARQUIVO_HTML")
+        todos = ws.get_all_values()
+        for row in todos[1:]:
+            if row and str(row[0]).strip() == str(req_num).strip():
+                return row[1] if len(row) > 1 else ""
+    except Exception as e:
+        logger.warning("Erro ao ler HTML da REQ %s: %s", req_num, e)
+    return ""
+
+
+def listar_reqs_com_html() -> list[str]:
+    """Retorna lista de números de REQ que têm HTML salvo."""
+    client   = _conectar()
+    planilha = client.open_by_key(SHEET_ID_NC)
+    try:
+        ws   = planilha.worksheet("ARQUIVO_HTML")
+        todos = ws.get_all_values()
+        return [row[0] for row in todos[1:] if row and row[0]]
+    except Exception:
+        return []
+
+
 def excluir_frase(tipo: str, texto: str) -> None:
     """Remove a frase que corresponde exatamente ao tipo e texto."""
     try:
