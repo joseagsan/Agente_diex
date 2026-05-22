@@ -2199,43 +2199,25 @@ def page_gerar_req(reqs, ncs):
             except Exception as e:
                 st.error(f"Erro ao gerar documento: {e}")
 
-    # ── Documento pronto: Drive ou download ───────────────────────────
+    # ── Downloads ─────────────────────────────────────────────────────
     if st.session_state.get("_doc_bytes"):
-        nome_arq   = st.session_state.get("_doc_nome", "REQ.docx")
-        doc_bytes  = st.session_state["_doc_bytes"]
-        drive_link = st.session_state.get("_doc_drive_link", "")
+        nome_arq  = st.session_state.get("_doc_nome", "REQ.docx")
+        doc_bytes = st.session_state["_doc_bytes"]
 
-        if not drive_link:
-            # Tenta enviar ao Drive se DRIVE_FOLDER_ID estiver configurado
-            from config import DRIVE_FOLDER_ID as _dfid
-            if _dfid:
-                with st.spinner("Enviando ao Drive..."):
-                    try:
-                        from sheets_nc import salvar_arquivo_no_drive
-                        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        drive_link = salvar_arquivo_no_drive(doc_bytes, nome_arq, mime)
-                        st.session_state["_doc_drive_link"] = drive_link
-                    except Exception as e:
-                        st.warning(f"Drive indisponível ({e}) — use o download abaixo.")
+        st.download_button(
+            "⬇️ Baixar DOCX",
+            data=doc_bytes,
+            file_name=nome_arq,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
 
-        if drive_link:
-            st.success(f"✅ DOCX salvo no Drive!")
-            st.markdown(f"📄 [Abrir {nome_arq} no Drive]({drive_link})")
-        else:
-            st.download_button(
-                "⬇️ Baixar DOCX",
-                data=doc_bytes,
-                file_name=nome_arq,
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-            )
-
-        # HTML sempre disponível para download
+        # HTML para download e visualização na aba Requisições
         if not st.session_state.get("_doc_html_bytes"):
             try:
                 from gerador_req_html import gerar_html_req
-                html = gerar_html_req(st.session_state.get("_doc_campos",{}),
-                                      st.session_state.get("_doc_itens_limpos",[]))
+                html = gerar_html_req(st.session_state.get("_doc_campos", {}),
+                                      st.session_state.get("_doc_itens_limpos", []))
                 st.session_state["_doc_html_bytes"] = html.encode("utf-8")
             except Exception:
                 pass
