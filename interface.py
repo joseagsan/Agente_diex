@@ -2193,18 +2193,22 @@ def page_gerar_req(reqs, ncs):
             st.info("📋 Deseja cadastrar esta requisição na planilha?")
             cad1, cad2 = st.columns(2)
             if cad1.button("✅ Sim, cadastrar", type="primary", use_container_width=True, key="btn_cad_sim"):
-                try:
-                    from sheets_nc import adicionar_req, salvar_html_req
-                    cf        = st.session_state["_doc_campos"]
-                    itens_lim = st.session_state.get("_doc_itens_limpos", [])
-                    req_num   = cf.get("requisition_id", "")
-                    desc      = "; ".join(i.get("DESCRICAO_ITEM","")[:40] for i in itens_lim[:3])
+                from sheets_nc import adicionar_req, salvar_html_req
+                cf        = st.session_state["_doc_campos"]
+                itens_lim = st.session_state.get("_doc_itens_limpos", [])
+                req_num   = cf.get("requisition_id", "")
+                desc      = "; ".join(i.get("DESCRICAO_ITEM","")[:40] for i in itens_lim[:3])
 
-                    # Salva HTML na planilha
-                    html_bytes = st.session_state.get("_doc_html_bytes", b"")
-                    if html_bytes:
+                # 1. Salva HTML (não bloqueia o cadastro se falhar)
+                html_bytes = st.session_state.get("_doc_html_bytes", b"")
+                if html_bytes:
+                    try:
                         salvar_html_req(req_num, html_bytes.decode("utf-8"))
+                    except Exception as e_html:
+                        st.warning(f"⚠️ HTML não salvo na planilha: {e_html}")
 
+                # 2. Cadastra REQ na planilha
+                try:
                     adicionar_req({
                         "REQ":        req_num,
                         "NE":         cf.get("NE", ""),
@@ -2222,7 +2226,7 @@ def page_gerar_req(reqs, ncs):
                     st.session_state["_doc_req_cadastrada"] = True
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Erro ao cadastrar: {e}")
+                    st.error(f"Erro ao cadastrar REQ na planilha: {e}")
             if cad2.button("✖ Não", use_container_width=True, key="btn_cad_nao"):
                 st.session_state["_doc_req_cadastrada"] = True
                 st.rerun()

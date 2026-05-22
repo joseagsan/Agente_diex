@@ -552,19 +552,31 @@ def salvar_html_req(req_num: str, html: str) -> None:
         ws = planilha.worksheet("ARQUIVO_HTML")
     except Exception:
         ws = planilha.add_worksheet(title="ARQUIVO_HTML", rows=500, cols=2)
-        ws.append_row(["REQ", "HTML"])
+        ws.update("A1:B1", [["REQ", "HTML"]], value_input_option="RAW")
+
+    todos = ws.get_all_values()
 
     # Remove versão anterior se existir
-    todos = ws.get_all_values()
     for i, row in enumerate(todos[1:], start=2):
         if row and str(row[0]).strip() == str(req_num).strip():
             ws.delete_rows(i)
+            todos = ws.get_all_values()  # recarrega após deleção
             break
 
-    # Limita a ~45k chars para não exceder limite da célula
-    html_truncado = html[:45000] if len(html) > 45000 else html
-    ws.append_row([str(req_num), html_truncado], value_input_option="RAW")
-    logger.info("HTML REQ %s salvo na planilha.", req_num)
+    # Limita a 40k chars para não exceder limite de célula do Sheets
+    html_salvo = html[:40000] if len(html) > 40000 else html
+
+    proxima = len(todos) + 1
+    if proxima > ws.row_count:
+        ws.add_rows(100)
+
+    from gspread.utils import rowcol_to_a1
+    ws.update(
+        range_name=f"A{proxima}:B{proxima}",
+        values=[[str(req_num), html_salvo]],
+        value_input_option="RAW",
+    )
+    logger.info("HTML REQ %s salvo (linha %d, %d chars)", req_num, proxima, len(html_salvo))
 
 
 def ler_html_req(req_num: str) -> str:
