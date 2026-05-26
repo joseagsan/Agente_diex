@@ -1077,120 +1077,116 @@ def page_reqs(reqs_legado, ncs):
         st.info("Nenhuma REQ encontrada.")
         return
 
-    # ── Lista compacta de REQs ────────────────────────────────────────
+    # ── Tabela selecionável ───────────────────────────────────────────
     from reqs_crud import excluir_req as _excluir, editar_req as _editar
 
-    for ridx, r_orig in enumerate(filtradas):
-        sit      = r_orig.get("SITUACAO", "")
-        req_num  = r_orig.get("REQ", "")
-        selected = st.session_state.get("detail_req") == req_num
-        c0, c1, c2, c3, c4, c5 = st.columns([1, 2, 4, 2, 2, 1])
-        c0.markdown(_badge(sit))
-        c1.markdown(f"**{req_num}**  \n{r_orig.get('DATA','')}")
-        c2.markdown(f"{r_orig.get('EMPRESA','')}  \n{r_orig.get('NC','')} · {r_orig.get('PI','')}")
-        c3.markdown(fmt(_val(r_orig)))
-        c4.markdown(f"_{sit}_")
-        if c5.button("✖" if selected else "📋", key=f"ver_{ridx}", use_container_width=True):
-            if selected:
-                st.session_state.pop("detail_req", None)
-                st.session_state.pop("confirm_del", None)
-            else:
-                st.session_state["detail_req"] = req_num
-                st.session_state.pop("confirm_del", None)
-            st.rerun()
+    df_r = pd.DataFrame([{
+        "": _badge(r.get("SITUACAO", "")),
+        "REQ":       r.get("REQ", ""),
+        "Data":      r.get("DATA", ""),
+        "NC":        r.get("NC", ""),
+        "NE":        r.get("NE", ""),
+        "Empresa":   r.get("EMPRESA", ""),
+        "Valor":     fmt(_val(r)),
+        "Situação":  r.get("SITUACAO", ""),
+        "Ent.SALC":  r.get("ENTRADA_SALC", ""),
+    } for r in filtradas])
+
+    st.caption("Clique em uma linha para ver / editar.")
+    evt = st.dataframe(
+        df_r, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row",
+        column_config={
+            "":        st.column_config.TextColumn("",        width=35),
+            "REQ":     st.column_config.TextColumn("REQ",     width=70),
+            "Data":    st.column_config.TextColumn("Data",    width=90),
+            "NC":      st.column_config.TextColumn("NC",      width=140),
+            "NE":      st.column_config.TextColumn("NE",      width=80),
+            "Empresa": st.column_config.TextColumn("Empresa", width=180),
+            "Valor":   st.column_config.TextColumn("Valor",   width=120),
+            "Situação":st.column_config.TextColumn("Situação",width=100),
+            "Ent.SALC":st.column_config.TextColumn("Ent.SALC",width=100),
+        },
+        key="req_table",
+    )
+
+    sel_rows = evt.selection.rows if (evt and hasattr(evt, "selection")) else []
+    r_d = filtradas[sel_rows[0]] if (sel_rows and sel_rows[0] < len(filtradas)) else None
 
     # ── Card de detalhes ──────────────────────────────────────────────
-    detail_req = st.session_state.get("detail_req")
-    if detail_req:
-        r_d = next((r for r in reqs if r.get("REQ") == detail_req), None)
-        if not r_d:
-            st.session_state.pop("detail_req", None)
+    if r_d:
+        detail_req = r_d.get("REQ", "")
+        sit_ops    = ["Pendente", "Empenhada", "Anulado"]
+        sit_atual  = r_d.get("SITUACAO", "Pendente")
+        sit_idx    = sit_ops.index(sit_atual) if sit_atual in sit_ops else 0
+
+        st.divider()
+        st.subheader(f"📋 REQ {detail_req}")
+
+        mi1, mi2, mi3, mi4 = st.columns(4)
+        mi1.metric("NC",   r_d.get("NC",   "—"))
+        mi2.metric("PI",   r_d.get("PI",   "—"))
+        mi3.metric("ND",   r_d.get("ND",   "—"))
+        mi4.metric("Tipo", r_d.get("TIPO", "—"))
+
+        st.divider()
+        ec1, ec2, ec3 = st.columns(3)
+
+        emp    = ec1.text_input("Empresa",      value=r_d.get("EMPRESA", ""),      key=f"d_emp_{detail_req}")
+        cnpj   = ec1.text_input("CNPJ",         value=r_d.get("CNPJ", ""),         key=f"d_cnpj_{detail_req}")
+        pregao = ec1.text_input("Pregão",        value=r_d.get("PREGAO", ""),       key=f"d_preg_{detail_req}")
+
+        ne     = ec2.text_input("NE",            value=r_d.get("NE", ""),           key=f"d_ne_{detail_req}")
+        entrada= ec2.text_input("Entrada SALC",  value=r_d.get("ENTRADA_SALC", ""),key=f"d_ent_{detail_req}")
+        obs    = ec2.text_area("Obs",            value=r_d.get("OBS", ""),          key=f"d_obs_{detail_req}", height=100)
+
+        sit    = ec3.selectbox("Situação", sit_ops, index=sit_idx,                 key=f"d_sit_{detail_req}")
+        val_e  = ec3.number_input("Valor (R$)", value=max(0.0, _val(r_d)),
+                                   min_value=0.0, step=0.01, format="%.2f",        key=f"d_val_{detail_req}")
+        ec3.caption(f"Data: {r_d.get('DATA', '')}")
+
+        st.divider()
+        if not st.session_state.get("confirm_del"):
+            ba, bb = st.columns(2)
+            if ba.button("💾 Salvar alterações", type="primary",
+                         use_container_width=True, key="det_salvar"):
+                sit_ant = r_d.get("SITUACAO", "")
+                try:
+                    _editar(detail_req, {**r_d,
+                        "EMPRESA": emp, "CNPJ": cnpj, "PREGAO": pregao,
+                        "NE": ne, "ENTRADA_SALC": entrada,
+                        "OBS": obs, "SITUACAO": sit, "VALOR": val_e})
+                    nc, val = r_d.get("NC", ""), _val(r_d)
+                    if nc and val:
+                        if sit == "Empenhada" and sit_ant != "Empenhada":
+                            try: atualizar_nc_empenhado(nc, val)
+                            except Exception as e: st.warning(f"NC não atualizada: {e}")
+                        elif sit == "Anulado" and sit_ant != "Anulado":
+                            try: atualizar_nc_empenhado(nc, -val)
+                            except Exception as e: st.warning(f"NC não atualizada: {e}")
+                    _ler_reqs_cached.clear()
+                    st.session_state.pop("req_table", None)
+                    st.success("✅ REQ atualizada!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro: {e}")
+            if bb.button("🗑️ Excluir REQ", use_container_width=True, key="det_excluir"):
+                st.session_state["confirm_del"] = detail_req
+                st.rerun()
         else:
-            st.divider()
-            with st.container(border=True):
-                st.subheader(f"📋 REQ {detail_req}")
-
-                # Campos somente-leitura em destaque
-                mi1, mi2, mi3, mi4 = st.columns(4)
-                mi1.metric("NC",   r_d.get("NC",   "—"))
-                mi2.metric("PI",   r_d.get("PI",   "—"))
-                mi3.metric("ND",   r_d.get("ND",   "—"))
-                mi4.metric("Tipo", r_d.get("TIPO", "—"))
-
-                st.divider()
-
-                pfx = f"det_{detail_req}_"
-                for k, v in [("emp",    r_d.get("EMPRESA", "")),
-                              ("cnpj",   r_d.get("CNPJ", "")),
-                              ("pregao", r_d.get("PREGAO", "")),
-                              ("ne",     r_d.get("NE", "")),
-                              ("entrada",r_d.get("ENTRADA_SALC", "")),
-                              ("obs",    r_d.get("OBS", "")),
-                              ("sit",    r_d.get("SITUACAO", "Pendente")),
-                              ("val",    _val(r_d))]:
-                    st.session_state.setdefault(pfx + k, v)
-
-                ec1, ec2, ec3 = st.columns(3)
-                emp    = ec1.text_input("Empresa",      key=pfx + "emp")
-                cnpj   = ec1.text_input("CNPJ",         key=pfx + "cnpj")
-                pregao = ec1.text_input("Pregão",        key=pfx + "pregao")
-
-                ne     = ec2.text_input("NE",            key=pfx + "ne")
-                entrada= ec2.text_input("Entrada SALC",  key=pfx + "entrada")
-                obs    = ec2.text_area("Obs",            key=pfx + "obs", height=100)
-
-                sit_ops = ["Pendente", "Empenhada", "Anulado"]
-                if st.session_state.get(pfx + "sit") not in sit_ops:
-                    st.session_state[pfx + "sit"] = r_d.get("SITUACAO", "Pendente") if r_d.get("SITUACAO") in sit_ops else "Pendente"
-                sit     = ec3.selectbox("Situação", sit_ops, key=pfx + "sit")
-                val_e   = ec3.number_input("Valor (R$)", min_value=0.0, step=0.01,
-                                            format="%.2f", key=pfx + "val")
-                ec3.caption(f"Data: {r_d.get('DATA', '')}  ·  DATA REQ")
-
-                st.divider()
-                if not st.session_state.get("confirm_del"):
-                    ba, bb = st.columns(2)
-                    if ba.button("💾 Salvar alterações", type="primary",
-                                 use_container_width=True, key="det_salvar"):
-                        sit_ant = r_d.get("SITUACAO", "")
-                        try:
-                            _editar(detail_req, {**r_d,
-                                "EMPRESA": emp, "CNPJ": cnpj, "PREGAO": pregao,
-                                "NE": ne, "ENTRADA_SALC": entrada,
-                                "OBS": obs, "SITUACAO": sit, "VALOR": val_e})
-                            nc, val = r_d.get("NC", ""), _val(r_d)
-                            if nc and val:
-                                if sit == "Empenhada" and sit_ant != "Empenhada":
-                                    try: atualizar_nc_empenhado(nc, val)
-                                    except Exception as e: st.warning(f"NC não atualizada: {e}")
-                                elif sit == "Anulado" and sit_ant != "Anulado":
-                                    try: atualizar_nc_empenhado(nc, -val)
-                                    except Exception as e: st.warning(f"NC não atualizada: {e}")
-                            _ler_reqs_cached.clear()
-                            st.session_state.pop("detail_req", None)
-                            st.success("✅ REQ atualizada!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erro: {e}")
-                    if bb.button("🗑️ Excluir REQ", use_container_width=True,
-                                 key="det_excluir"):
-                        st.session_state["confirm_del"] = detail_req
-                        st.rerun()
-                else:
-                    st.warning(f"⚠️ Confirmar exclusão da REQ **{detail_req}**?")
-                    cc1, cc2 = st.columns(2)
-                    if cc1.button("✅ Sim, excluir", type="primary",
-                                  use_container_width=True, key="det_del_ok"):
-                        _excluir(detail_req)
-                        _ler_reqs_cached.clear()
-                        st.session_state.pop("detail_req", None)
-                        st.session_state.pop("confirm_del", None)
-                        st.success("🗑️ REQ excluída.")
-                        st.rerun()
-                    if cc2.button("✖ Cancelar", use_container_width=True,
-                                  key="det_del_cancel"):
-                        st.session_state.pop("confirm_del", None)
-                        st.rerun()
+            st.warning(f"⚠️ Confirmar exclusão da REQ **{detail_req}**?")
+            cc1, cc2 = st.columns(2)
+            if cc1.button("✅ Sim, excluir", type="primary",
+                          use_container_width=True, key="det_del_ok"):
+                _excluir(detail_req)
+                _ler_reqs_cached.clear()
+                st.session_state.pop("confirm_del", None)
+                st.session_state.pop("req_table", None)
+                st.success("🗑️ REQ excluída.")
+                st.rerun()
+            if cc2.button("✖ Cancelar", use_container_width=True, key="det_del_cancel"):
+                st.session_state.pop("confirm_del", None)
+                st.rerun()
 
     # ── Consulta de saldo por NC ──────────────────────────────────────
     st.divider()
