@@ -987,14 +987,21 @@ def _form_nc():
                     st.error(f"Erro: {e}")
 
 
+# ── Cache para ler_reqs (evita 429 Quota exceeded) ────────────────────────────
+@st.cache_data(ttl=60, show_spinner=False)
+def _ler_reqs_cached():
+    from reqs_crud import ler_reqs
+    return ler_reqs()
+
+
 # ── Requisições ───────────────────────────────────────────────────────────────
 def page_reqs(reqs_legado, ncs):
     """Página de Requisições — usa SSAC_REQS (nova aba limpa)."""
     import streamlit.components.v1 as components
-    from reqs_crud import ler_reqs, atualizar_req, itens_da_req
+    from reqs_crud import atualizar_req, itens_da_req
     from sheets_nc import atualizar_nc_empenhado, recalcular_empenhados
 
-    reqs = ler_reqs()
+    reqs = _ler_reqs_cached()
 
     st.title("📝 Requisições")
 
@@ -1070,186 +1077,120 @@ def page_reqs(reqs_legado, ncs):
         st.info("Nenhuma REQ encontrada.")
         return
 
-    # ── Tabela ────────────────────────────────────────────────────────
-    rows = []
-    for r in filtradas:
-        rows.append({
-            "":           _badge(r.get("SITUACAO", "")),
-            "REQ":        r.get("REQ", ""),
-            "DATA":       r.get("DATA", ""),
-            "NC":         r.get("NC", ""),
-            "NE":         r.get("NE", ""),
-            "PI":         r.get("PI", ""),
-            "EMPRESA":    r.get("EMPRESA", ""),
-            "VALOR":      fmt(_val(r)),
-            "SITUACAO":   r.get("SITUACAO", ""),
-            "ENTRADA":    r.get("ENTRADA_SALC", ""),
-            "OBS":        r.get("OBS", ""),
-        })
+    # ── Lista compacta de REQs ────────────────────────────────────────
+    from reqs_crud import excluir_req as _excluir, editar_req as _editar
 
-    # ── Lista com ações por linha ──────────────────────────────────────
-    from reqs_crud import excluir_req as _excluir
-
-    for ridx, (row, r_orig) in enumerate(zip(rows, filtradas)):
-        ca, cb, cc, cd, ce, cf = st.columns([1, 2, 5, 1, 1, 1])
-        ca.markdown(row[""])
-        cb.markdown(f"**{row['REQ']}** {row['DATA']}")
-        cc.markdown(f"{row['EMPRESA']} · {row['NC']} · {row['VALOR']} · _{row['SITUACAO']}_")
-        if cd.button("✏️", key=f"edit_{ridx}"):
-            st.session_state["edit_req"] = row["REQ"]
-            st.rerun()
-        if ce.button("🗑️", key=f"del_{ridx}"):
-            _excluir(row["REQ"])
-            st.session_state.pop("edit_req", None)
-            st.rerun()
-        if cf.button("📧", key=f"email_{ridx}"):
-            st.session_state["email_req"] = row["REQ"]
+    for ridx, r_orig in enumerate(filtradas):
+        sit      = r_orig.get("SITUACAO", "")
+        req_num  = r_orig.get("REQ", "")
+        selected = st.session_state.get("detail_req") == req_num
+        c0, c1, c2, c3, c4, c5 = st.columns([1, 2, 4, 2, 2, 1])
+        c0.markdown(_badge(sit))
+        c1.markdown(f"**{req_num}**  \n{r_orig.get('DATA','')}")
+        c2.markdown(f"{r_orig.get('EMPRESA','')}  \n{r_orig.get('NC','')} · {r_orig.get('PI','')}")
+        c3.markdown(fmt(_val(r_orig)))
+        c4.markdown(f"_{sit}_")
+        if c5.button("✖" if selected else "📋", key=f"ver_{ridx}", use_container_width=True):
+            if selected:
+                st.session_state.pop("detail_req", None)
+                st.session_state.pop("confirm_del", None)
+            else:
+                st.session_state["detail_req"] = req_num
+                st.session_state.pop("confirm_del", None)
             st.rerun()
 
-    # ── Painel de edição / email (fora do loop) ───────────────────────
-    req_acao = st.session_state.get("edit_req") or st.session_state.get("email_req")
-    if req_acao:
-        r_edit = next((r for r in filtradas if r.get("REQ") == req_acao), None)
-        if not r_edit:
-            st.session_state.pop("edit_req", None)
-            st.session_state.pop("email_req", None)
-        elif st.session_state.get("edit_req"):
+    # ── Card de detalhes ──────────────────────────────────────────────
+    detail_req = st.session_state.get("detail_req")
+    if detail_req:
+        r_d = next((r for r in filtradas if r.get("REQ") == detail_req), None)
+        if not r_d:
+            st.session_state.pop("detail_req", None)
+        else:
             st.divider()
-            st.subheader(f"✏️ Editar REQ {req_acao}")
-            from reqs_crud import editar_req as _editar
-            # Guarda valores editáveis no session state para persistir
-            _pfx = f"_ed_{req_acao}_"
-            for k, default in [("EMPRESA", r_edit.get("EMPRESA","")),
-                                ("NE",      r_edit.get("NE","")),
-                                ("CNPJ",    r_edit.get("CNPJ","")),
-                                ("OBS",     r_edit.get("OBS","")),
-                                ("ENTRADA_SALC", r_edit.get("ENTRADA_SALC","")),
-                                ("SITUACAO",r_edit.get("SITUACAO","Pendente"))]:
-                st.session_state.setdefault(_pfx + k, default)
+            with st.container(border=True):
+                st.subheader(f"📋 REQ {detail_req}")
 
-            ec1, ec2 = st.columns(2)
-            emp  = ec1.text_input("Empresa",      key=_pfx+"EMPRESA")
-            ne_e = ec1.text_input("NE",           key=_pfx+"NE")
-            cnpj = ec1.text_input("CNPJ",         key=_pfx+"CNPJ")
-            obs  = ec1.text_input("Obs",          key=_pfx+"OBS")
-            sit_ops = ["Pendente","Empenhada","Anulado"]
-            sit_e   = ec2.selectbox("Situação", sit_ops,
-                                    index=sit_ops.index(st.session_state[_pfx+"SITUACAO"])
-                                    if st.session_state[_pfx+"SITUACAO"] in sit_ops else 0,
-                                    key=_pfx+"SITUACAO")
-            ent_e   = ec2.text_input("Entrada SALC", key=_pfx+"ENTRADA_SALC")
-            try:
-                val_def = parse(r_edit.get("VALOR","0"))
-            except Exception:
-                val_def = 0.0
-            val_e = ec2.number_input("Valor (R$)", value=val_def,
-                                     min_value=0.0, step=0.01, format="%.2f",
-                                     key=_pfx+"VALOR")
+                # Campos somente-leitura em destaque
+                mi1, mi2, mi3, mi4 = st.columns(4)
+                mi1.metric("NC",   r_d.get("NC",   "—"))
+                mi2.metric("PI",   r_d.get("PI",   "—"))
+                mi3.metric("ND",   r_d.get("ND",   "—"))
+                mi4.metric("Tipo", r_d.get("TIPO", "—"))
 
-            sb1, sb2 = st.columns(2)
-            if sb1.button("💾 Salvar edição", type="primary", use_container_width=True, key="btn_sv_edit"):
-                try:
-                    _editar(req_acao, {**r_edit,
-                                       "EMPRESA": emp, "NE": ne_e, "CNPJ": cnpj,
-                                       "OBS": obs, "SITUACAO": sit_e,
-                                       "ENTRADA_SALC": ent_e, "VALOR": val_e})
-                    # Limpa prefixo
-                    for k in list(st.session_state.keys()):
-                        if k.startswith(_pfx):
-                            del st.session_state[k]
-                    st.session_state.pop("edit_req", None)
-                    st.success("✅ REQ atualizada!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao salvar: {e}")
-            if sb2.button("✖ Cancelar", use_container_width=True, key="btn_cancel_edit"):
-                st.session_state.pop("edit_req", None)
-                st.rerun()
+                st.divider()
 
-        elif st.session_state.get("email_req"):
-            st.divider()
-            st.subheader(f"📧 Enviar REQ {req_acao} por email")
-            dest = st.text_input("Email do destinatário", key="email_dest_inp")
-            se1, se2 = st.columns(2)
-            if se1.button("📧 Enviar", type="primary", use_container_width=True, key="btn_send_email"):
-                if dest:
-                    try:
-                        from gerador_req_html import gerar_html_req
-                        itens_e = itens_da_req(req_acao)
-                        campos_e = {"requisition_id": r_edit.get("REQ",""),
-                                    "LOCAL_DATA": r_edit.get("DATA",""), "UG": UG_PADRAO,
-                                    "OM": OM_PADRAO,
-                                    "FORNECEDOR_NOME": r_edit.get("EMPRESA",""),
-                                    "FORNECEDOR_CNPJ": r_edit.get("CNPJ",""),
-                                    "MODALIDADE": r_edit.get("PREGAO",""),
-                                    "DADOS_NC": r_edit.get("NC",""), "NE": r_edit.get("NE",""),
-                                    "PI": r_edit.get("PI",""), "ND": r_edit.get("ND",""),
-                                    "TIPO": r_edit.get("TIPO","Ordinário"),
-                                    "TOTAL": fmt(_val(r_edit)),
-                                    "ASSUNTO":"","INTRO_1":"","JUSTIFICATIVA":"",
-                                    "FINALIDADE":"","PTRES":""}
-                        html_e = gerar_html_req(campos_e, itens_e)
-                        _enviar_email(dest, f"REQ {req_acao}", html_e)
-                        st.success(f"✅ Email enviado para {dest}!")
-                        st.session_state.pop("email_req", None)
+                pfx = f"det_{detail_req}_"
+                for k, v in [("emp",    r_d.get("EMPRESA", "")),
+                              ("cnpj",   r_d.get("CNPJ", "")),
+                              ("pregao", r_d.get("PREGAO", "")),
+                              ("ne",     r_d.get("NE", "")),
+                              ("entrada",r_d.get("ENTRADA_SALC", "")),
+                              ("obs",    r_d.get("OBS", "")),
+                              ("sit",    r_d.get("SITUACAO", "Pendente")),
+                              ("val",    _val(r_d))]:
+                    st.session_state.setdefault(pfx + k, v)
+
+                ec1, ec2, ec3 = st.columns(3)
+                emp    = ec1.text_input("Empresa",      key=pfx + "emp")
+                cnpj   = ec1.text_input("CNPJ",         key=pfx + "cnpj")
+                pregao = ec1.text_input("Pregão",        key=pfx + "pregao")
+
+                ne     = ec2.text_input("NE",            key=pfx + "ne")
+                entrada= ec2.text_input("Entrada SALC",  key=pfx + "entrada")
+                obs    = ec2.text_area("Obs",            key=pfx + "obs", height=100)
+
+                sit_ops = ["Pendente", "Empenhada", "Anulado"]
+                sit_def = st.session_state.get(pfx + "sit", "Pendente")
+                sit_idx = sit_ops.index(sit_def) if sit_def in sit_ops else 0
+                sit     = ec3.selectbox("Situação", sit_ops, index=sit_idx, key=pfx + "sit")
+                val_e   = ec3.number_input("Valor (R$)", min_value=0.0, step=0.01,
+                                            format="%.2f", key=pfx + "val")
+                ec3.caption(f"Data: {r_d.get('DATA', '')}  ·  DATA REQ")
+
+                st.divider()
+                if not st.session_state.get("confirm_del"):
+                    ba, bb = st.columns(2)
+                    if ba.button("💾 Salvar alterações", type="primary",
+                                 use_container_width=True, key="det_salvar"):
+                        sit_ant = r_d.get("SITUACAO", "")
+                        try:
+                            _editar(detail_req, {**r_d,
+                                "EMPRESA": emp, "CNPJ": cnpj, "PREGAO": pregao,
+                                "NE": ne, "ENTRADA_SALC": entrada,
+                                "OBS": obs, "SITUACAO": sit, "VALOR": val_e})
+                            nc, val = r_d.get("NC", ""), _val(r_d)
+                            if nc and val:
+                                if sit == "Empenhada" and sit_ant != "Empenhada":
+                                    try: atualizar_nc_empenhado(nc, val)
+                                    except Exception as e: st.warning(f"NC não atualizada: {e}")
+                                elif sit == "Anulado" and sit_ant != "Anulado":
+                                    try: atualizar_nc_empenhado(nc, -val)
+                                    except Exception as e: st.warning(f"NC não atualizada: {e}")
+                            _ler_reqs_cached.clear()
+                            st.session_state.pop("detail_req", None)
+                            st.success("✅ REQ atualizada!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erro: {e}")
+                    if bb.button("🗑️ Excluir REQ", use_container_width=True,
+                                 key="det_excluir"):
+                        st.session_state["confirm_del"] = detail_req
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro: {e}")
-            if se2.button("✖ Cancelar", use_container_width=True, key="btn_cancel_email"):
-                st.session_state.pop("email_req", None)
-                st.rerun()
-
-    st.divider()
-    st.caption("Tabela completa (edite Situação, Entrada SALC e NE diretamente):")
-    df_r   = pd.DataFrame(rows)
-    edited = st.data_editor(
-        df_r, use_container_width=True, hide_index=True,
-        column_config={
-            "":        st.column_config.TextColumn("",        width=35,  disabled=True),
-            "REQ":     st.column_config.TextColumn("REQ",     width=65,  disabled=True),
-            "DATA":    st.column_config.TextColumn("Data",    width=90,  disabled=True),
-            "NC":      st.column_config.TextColumn("NC",      width=130, disabled=True),
-            "NE":      st.column_config.TextColumn("NE",      width=90),
-            "PI":      st.column_config.TextColumn("PI",      width=70,  disabled=True),
-            "EMPRESA": st.column_config.TextColumn("Empresa", width=170, disabled=True),
-            "VALOR":   st.column_config.TextColumn("Valor",   width=120, disabled=True),
-            "SITUACAO":st.column_config.SelectboxColumn("Situação", width=110,
-                           options=["Pendente", "Empenhada", "Anulado"]),
-            "ENTRADA": st.column_config.TextColumn("Entrada SALC", width=110),
-            "OBS":     st.column_config.TextColumn("Obs",     width=120, disabled=True),
-        },
-        key="req_editor_novo",
-    )
-
-    # Detecta e salva alterações
-    changed = []
-    for i, (orig, novo) in enumerate(zip(rows, edited.to_dict("records"))):
-        if orig["SITUACAO"] != novo["SITUACAO"] or orig["ENTRADA"] != novo["ENTRADA"] or orig["NE"] != novo["NE"]:
-            req_orig = filtradas[i] if i < len(filtradas) else {}
-            changed.append({"req": orig["REQ"], "sit": novo["SITUACAO"],
-                             "sit_ant": orig["SITUACAO"], "entrada": novo["ENTRADA"],
-                             "ne": novo["NE"], "nc": req_orig.get("NC",""),
-                             "valor": _val(req_orig)})
-
-    if changed:
-        st.info(f"✏️ {len(changed)} linha(s) alterada(s).")
-        if st.button("💾 Salvar alterações", type="primary", key="btn_salvar_reqs"):
-            try:
-                for c in changed:
-                    atualizar_req(c["req"], c["sit"], c["entrada"], c["ne"])
-                    nc, val = c["nc"], c["valor"]
-                    if nc and val:
-                        if c["sit"] == "Empenhada" and c["sit_ant"] != "Empenhada":
-                            try: atualizar_nc_empenhado(nc, val)
-                            except Exception as e: st.warning(f"NC não atualizada: {e}")
-                        elif c["sit"] == "Anulado" and c["sit_ant"] != "Anulado":
-                            try: atualizar_nc_empenhado(nc, -val)
-                            except Exception as e: st.warning(f"NC não atualizada: {e}")
-                carregar(forcar=True)
-                st.success("✅ Salvo!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erro: {e}")
+                else:
+                    st.warning(f"⚠️ Confirmar exclusão da REQ **{detail_req}**?")
+                    cc1, cc2 = st.columns(2)
+                    if cc1.button("✅ Sim, excluir", type="primary",
+                                  use_container_width=True, key="det_del_ok"):
+                        _excluir(detail_req)
+                        _ler_reqs_cached.clear()
+                        st.session_state.pop("detail_req", None)
+                        st.session_state.pop("confirm_del", None)
+                        st.success("🗑️ REQ excluída.")
+                        st.rerun()
+                    if cc2.button("✖ Cancelar", use_container_width=True,
+                                  key="det_del_cancel"):
+                        st.session_state.pop("confirm_del", None)
+                        st.rerun()
 
     # ── Consulta de saldo por NC ──────────────────────────────────────
     st.divider()
@@ -1447,6 +1388,7 @@ def _form_req_novo(ncs):
                         "OBS":          obs,
                         "ITENS":        [],
                     })
+                    _ler_reqs_cached.clear()
                     st.success("✅ REQ cadastrada!")
                     st.session_state["form_req"] = False
                     st.rerun()
@@ -2340,6 +2282,7 @@ def page_gerar_req(reqs, ncs):
                         "SITUACAO": "Pendente",
                         "ITENS":   itens_lim,
                     })
+                    _ler_reqs_cached.clear()
                     st.session_state["_doc_req_cadastrada"] = True
                     st.rerun()
                 except Exception as e:
