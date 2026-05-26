@@ -1102,7 +1102,7 @@ def page_reqs(reqs_legado, ncs):
     # ── Card de detalhes ──────────────────────────────────────────────
     detail_req = st.session_state.get("detail_req")
     if detail_req:
-        r_d = next((r for r in filtradas if r.get("REQ") == detail_req), None)
+        r_d = next((r for r in reqs if r.get("REQ") == detail_req), None)
         if not r_d:
             st.session_state.pop("detail_req", None)
         else:
@@ -1140,9 +1140,9 @@ def page_reqs(reqs_legado, ncs):
                 obs    = ec2.text_area("Obs",            key=pfx + "obs", height=100)
 
                 sit_ops = ["Pendente", "Empenhada", "Anulado"]
-                sit_def = st.session_state.get(pfx + "sit", "Pendente")
-                sit_idx = sit_ops.index(sit_def) if sit_def in sit_ops else 0
-                sit     = ec3.selectbox("Situação", sit_ops, index=sit_idx, key=pfx + "sit")
+                if st.session_state.get(pfx + "sit") not in sit_ops:
+                    st.session_state[pfx + "sit"] = r_d.get("SITUACAO", "Pendente") if r_d.get("SITUACAO") in sit_ops else "Pendente"
+                sit     = ec3.selectbox("Situação", sit_ops, key=pfx + "sit")
                 val_e   = ec3.number_input("Valor (R$)", min_value=0.0, step=0.01,
                                             format="%.2f", key=pfx + "val")
                 ec3.caption(f"Data: {r_d.get('DATA', '')}  ·  DATA REQ")
