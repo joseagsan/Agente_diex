@@ -1941,75 +1941,145 @@ def page_gerar_req(reqs, ncs):
         from pesquisa_compras import buscar_itens_fornecedor
         forn_atual           = st.session_state.get("_b2_forn", "")
         itens_ja_adicionados = {it["ITEM"] for it in st.session_state.req_itens}
-
-        # Mostra ND/SI que será aplicado ao clicar ➕
-        _nd_atual = st.session_state.get("_fi_nd", "— sem ND —")
-        _si_atual = st.session_state.get("_fi_si", "— sem SI —")
-        _si_num   = _num_si(_si_atual)
-        if _nd_atual != "— sem ND —":
-            st.caption(f"📋 Ao clicar ➕: **ND** = {_nd_atual.split('–')[0].strip()} | **SI** = {_si_num or '—'} *(ajuste abaixo se necessário)*")
         itens_cache          = st.session_state.get("pesq_itens_cache", {})
         pregao_atual         = st.session_state.get("pesq_pregao", "")
+
+        _nd_atual = st.session_state.get("_fi_nd", "— sem ND —")
+        _si_num   = _num_si(st.session_state.get("_fi_si", "— sem SI —"))
+        if _nd_atual != "— sem ND —":
+            st.caption(f"📋 Ao clicar ➕: **ND** = {_nd_atual.split('–')[0].strip()} | **SI** = {_si_num or '—'} *(ajuste abaixo se necessário)*")
 
         st.success(f"✅ {len(fornecedores_pesq)} fornecedor(es) | Compra ID: {compra_id_pesq}")
         if forn_atual:
             st.info(f"🔒 Vinculado a **{forn_atual}**")
 
-        for fidx, forn in enumerate(fornecedores_pesq):
-            forn_id   = forn["fornecedor_id"]
-            forn_nome = forn["nome"]
-            cnpj_grp  = forn["cnpj"]
-            label_exp = f"🏢 **{forn_nome}** — {cnpj_grp}"
+        def _add_item_req(item, forn_nome, cnpj_grp):
+            _si  = _num_si(st.session_state.get("_fi_si", ""))
+            num  = item.get("numero", "")
+            v    = item.get("valor_unit", 0.0)
+            st.session_state.req_itens.append({
+                "ORD":            str(len(st.session_state.req_itens) + 1),
+                "ITEM":           str(num),
+                "SI":             _si,
+                "DESCRICAO_ITEM": item.get("descricao", ""),
+                "UND":            "UN",
+                "QTD":            "1,000",
+                "VALOR_UNIT":     fmt(v),
+                "VALOR_TOTAL":    fmt(v),
+                "_total":         v,
+                "_vunit":         v,
+            })
+            st.session_state["_b2_forn"]   = forn_nome
+            st.session_state["_b2_cnpj"]   = cnpj_grp
+            st.session_state["_b2_pregao"] = pregao_atual
+            st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
+            st.session_state["_b2_vig"]    = ""
+            st.session_state["_b2_ver"]    = st.session_state.get("_b2_ver", 0) + 1
 
-            with st.expander(label_exp, expanded=False):
-                if forn_id not in itens_cache:
-                    if st.button("📦 Carregar itens", key=f"load_{forn_id}"):
-                        with st.spinner("Carregando..."):
-                            itens = buscar_itens_fornecedor(compra_id_pesq, forn_id)
-                        itens_cache[forn_id] = itens
-                        st.session_state["pesq_itens_cache"] = itens_cache
-                        st.rerun()
+        tab_forn, tab_todos = st.tabs(["📂 Por Fornecedor", "📋 Todos os Itens"])
+
+        # ── Aba 1: Por Fornecedor ──────────────────────────────────────────
+        with tab_forn:
+            for fidx, forn in enumerate(fornecedores_pesq):
+                forn_id   = forn["fornecedor_id"]
+                forn_nome = forn["nome"]
+                cnpj_grp  = forn["cnpj"]
+                with st.expander(f"🏢 **{forn_nome}** — {cnpj_grp}", expanded=False):
+                    if forn_id not in itens_cache:
+                        if st.button("📦 Carregar itens", key=f"load_{forn_id}"):
+                            with st.spinner("Carregando..."):
+                                itens_cache[forn_id] = buscar_itens_fornecedor(compra_id_pesq, forn_id)
+                            st.session_state["pesq_itens_cache"] = itens_cache
+                            st.rerun()
+                    else:
+                        itens = itens_cache[forn_id]
+                        st.caption(f"{len(itens)} item(ns)")
+                        for gidx, item in enumerate(itens):
+                            num   = item.get("numero", "")
+                            ja    = num in itens_ja_adicionados
+                            saldo = item.get("qtd_saldo", "")
+                            v     = item.get("valor_unit", 0.0)
+                            ca, cb, cc = st.columns([1, 8, 2])
+                            ca.markdown(f"**{num}**")
+                            cb.markdown(
+                                f"{item.get('descricao','')[:80]}"
+                                f"&nbsp;&nbsp;<span style='color:#449D44;font-weight:700'>{fmt(v)}</span>"
+                                f"&nbsp;&nbsp;<span style='color:#888;font-size:.85em'>Saldo: {saldo}</span>",
+                                unsafe_allow_html=True,
+                            )
+                            if ja:
+                                cc.markdown("✓")
+                            elif cc.button("➕", key=f"add_{forn_id}_{gidx}"):
+                                if forn_atual and forn_nome != forn_atual:
+                                    st.error(f"❌ Req vinculada a **{forn_atual}**.")
+                                else:
+                                    _add_item_req(item, forn_nome, cnpj_grp)
+
+        # ── Aba 2: Todos os Itens ──────────────────────────────────────────
+        with tab_todos:
+            n_forn   = len(fornecedores_pesq)
+            n_carregados = sum(1 for f in fornecedores_pesq if f["fornecedor_id"] in itens_cache)
+
+            if n_carregados < n_forn:
+                st.info(f"📦 {n_carregados}/{n_forn} fornecedor(es) carregado(s).")
+                if st.button("📦 Carregar todos os itens", key="btn_load_todos", type="primary",
+                             use_container_width=True):
+                    bar = st.progress(0, text="Carregando fornecedores...")
+                    for i, forn in enumerate(fornecedores_pesq):
+                        fid = forn["fornecedor_id"]
+                        if fid not in itens_cache:
+                            itens_cache[fid] = buscar_itens_fornecedor(compra_id_pesq, fid)
+                        bar.progress((i + 1) / n_forn, text=f"{forn['nome'][:40]}")
+                    st.session_state["pesq_itens_cache"] = itens_cache
+                    st.rerun()
+
+            # Monta lista flat de todos os itens carregados
+            todos = []
+            for forn in fornecedores_pesq:
+                for item in itens_cache.get(forn["fornecedor_id"], []):
+                    todos.append({**item, "_fn": forn["nome"], "_fc": forn["cnpj"],
+                                  "_fid": forn["fornecedor_id"]})
+
+            if todos:
+                busca_txt = st.text_input("🔍 Filtrar por descrição, número ou fornecedor…",
+                                          key="busca_todos_itens", placeholder="ex: cadeira, 00045, Empresa X")
+                if busca_txt:
+                    q = busca_txt.lower()
+                    filtrados = [i for i in todos if
+                                 q in i.get("descricao", "").lower() or
+                                 q in str(i.get("numero", "")) or
+                                 q in i.get("_fn", "").lower()]
                 else:
-                    itens = itens_cache[forn_id]
-                    st.caption(f"{len(itens)} item(ns)")
-                    for gidx, item in enumerate(itens):
-                        num   = item.get("numero", "")
-                        ja    = num in itens_ja_adicionados
-                        saldo = item.get("qtd_saldo", "")
-                        v     = item.get("valor_unit", 0.0)
-                        ca, cb, cc = st.columns([1, 8, 2])
-                        ca.markdown(f"**{num}**")
-                        cb.markdown(
-                            f"{item.get('descricao','')[:80]}"
-                            f"&nbsp;&nbsp;<span style='color:#449D44;font-weight:700'>{fmt(v)}</span>"
-                            f"&nbsp;&nbsp;<span style='color:#888;font-size:.85em'>Saldo: {saldo}</span>",
-                            unsafe_allow_html=True,
-                        )
-                        if ja:
-                            cc.markdown("✓")
-                        elif cc.button("➕", key=f"add_{forn_id}_{gidx}"):
-                            if forn_atual and forn_nome != forn_atual:
-                                st.error(f"❌ Req vinculada a **{forn_atual}**.")
-                            else:
-                                _si = _num_si(st.session_state.get("_fi_si", ""))
-                                st.session_state.req_itens.append({
-                                    "ORD":            str(len(st.session_state.req_itens) + 1),
-                                    "ITEM":           str(num),
-                                    "SI":             _si,
-                                    "DESCRICAO_ITEM": item.get("descricao", ""),
-                                    "UND":            "UN",
-                                    "QTD":            "1,000",
-                                    "VALOR_UNIT":     fmt(v),
-                                    "VALOR_TOTAL":    fmt(v),
-                                    "_total":         v,
-                                    "_vunit":         v,
-                                })
-                                st.session_state["_b2_forn"]   = forn_nome
-                                st.session_state["_b2_cnpj"]   = cnpj_grp
-                                st.session_state["_b2_pregao"] = pregao_atual
-                                st.session_state["_b2_ug"]     = str(st.session_state.get("pesq_uasg", UG_PADRAO))
-                                st.session_state["_b2_vig"]    = ""
-                                st.session_state["_b2_ver"]    = st.session_state.get("_b2_ver", 0) + 1
+                    filtrados = todos
+
+                total_txt = f"{len(filtrados)}" if not busca_txt else f"{len(filtrados)} de {len(todos)}"
+                st.caption(f"{total_txt} item(ns)")
+
+                for gidx, item in enumerate(filtrados):
+                    num      = item.get("numero", "")
+                    ja       = num in itens_ja_adicionados
+                    saldo    = item.get("qtd_saldo", "")
+                    v        = item.get("valor_unit", 0.0)
+                    forn_nome= item["_fn"]
+                    cnpj_grp = item["_fc"]
+                    ca, cb, cc = st.columns([1, 9, 1])
+                    ca.markdown(f"**{num}**")
+                    cb.markdown(
+                        f"{item.get('descricao','')[:90]}"
+                        f"&nbsp;&nbsp;<span style='color:#449D44;font-weight:700'>{fmt(v)}</span>"
+                        f"&nbsp;&nbsp;<span style='color:#888;font-size:.82em'>Saldo: {saldo}"
+                        f" · {forn_nome[:35]}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    if ja:
+                        cc.markdown("✓")
+                    elif cc.button("➕", key=f"addT_{gidx}"):
+                        if forn_atual and forn_nome != forn_atual:
+                            st.error(f"❌ Req vinculada a **{forn_atual}**.")
+                        else:
+                            _add_item_req(item, forn_nome, cnpj_grp)
+            elif n_carregados == n_forn:
+                st.info("Nenhum item encontrado nos fornecedores.")
 
     # ── Bloco 2: Dados do Fornecedor / Pregão (preenchido pela pesquisa)
     st.divider()
