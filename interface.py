@@ -20,7 +20,7 @@ st.set_page_config(
 logging.basicConfig(level=logging.INFO)
 
 from auth import logout, requer_auth
-from config import ANTHROPIC_API_KEY, OM_PADRAO, UG_PADRAO, SHEET_ID_NC
+from config import ANTHROPIC_API_KEY, OM_PADRAO, UG_PADRAO, SHEET_ID_NC, SHEET_ID_NC_ORIGEM, RESP_PADRAO
 from relatorios import (
     exportar_excel, kpis, ncs_por_operacao, ncs_vencendo,
     relatorio_extrato_nc, relatorio_por_empresa, relatorio_saldo_pi, relatorio_saldo_nd,
@@ -213,8 +213,6 @@ def _cl() -> dict:
         legend=dict(orientation="h", y=1.15, font=dict(size=11)),
     )
 
-
-ORGAOS = ["COTER", "COEX", "DGO", "DEC", "DECEX", "12 RM", "Outro"]
 
 SUBITENS: dict[str, list[str]] = {
     "339030 – Material de Consumo": [
@@ -419,6 +417,7 @@ NAV_GRUPOS = [
 ]
 NAV = [item for _, itens in NAV_GRUPOS for item in itens]
 LINK_SHEETS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID_NC}/edit"
+LINK_SHEETS_NC = f"https://docs.google.com/spreadsheets/d/{SHEET_ID_NC_ORIGEM}/edit"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -471,15 +470,19 @@ def carregar(forcar: bool = False):
     try:
         return _load()
     except Exception as e:
-        abas_hint = ""
+        from config import SHEET_ID_NC_ORIGEM
+        hint = ""
         try:
             from sheets_nc import listar_abas
-            abas = listar_abas()
-            if abas:
-                abas_hint = f"\n\nAbas disponíveis: **{', '.join(abas)}**"
+            abas_nc = listar_abas(SHEET_ID_NC_ORIGEM)
+            if abas_nc:
+                hint += f"\n\nAbas da planilha de NCs (Bda): **{', '.join(abas_nc)}**"
+            abas_ssac = listar_abas()
+            if abas_ssac:
+                hint += f"\n\nAbas da planilha do SSAC: **{', '.join(abas_ssac)}**"
         except Exception:
             pass
-        st.error(f"Erro ao carregar planilha: {e}{abas_hint}")
+        st.error(f"Erro ao carregar planilha: {e}{hint}")
         return [], [], []
 
 
@@ -754,7 +757,7 @@ def page_dashboard(ncs, reqs):
     col_link, _ = st.columns([1, 5])
     with col_link:
         st.markdown(
-            f'<a href="{LINK_SHEETS}" target="_blank">'
+            f'<a href="{LINK_SHEETS_NC}" target="_blank">'
             f'<button style="background:#1a2540;color:#94a3b8;border:1px solid #1a2540;'
             f'border-radius:6px;padding:4px 12px;font-size:.8rem;cursor:pointer;">'
             f'📊 Abrir Planilha</button></a>',
@@ -785,20 +788,6 @@ def page_ncs(ncs, reqs=None):
     st.title("📋 Notas de Crédito")
     hoje = date.today()
     reqs = reqs or []
-
-    # Calcula empenhado por NC a partir das requisições (fonte de verdade)
-    from collections import defaultdict
-    emp_por_nc: dict[str, float] = defaultdict(float)
-    for r in reqs:
-        nc_r  = r.get("NC", "")
-        val_r = parse(r.get("VALOR", 0))
-        sit_r = r.get("SITUAÇÃO", "")
-        if sit_r == "Empenhada" and nc_r:
-            emp_por_nc[nc_r] += val_r
-        elif sit_r == "Anulado" and nc_r:
-            emp_por_nc[nc_r] -= val_r
-    # Garante não negativo
-    emp_por_nc = {k: max(0.0, v) for k, v in emp_por_nc.items()}
 
     def _dias_prazo(nc):
         try:
@@ -873,26 +862,24 @@ def page_ncs(ncs, reqs=None):
         filtradas.append(nc)
 
     # ── Barra de ações ─────────────────────────────────────────────────
-    ac1, ac2, ac3 = st.columns([1, 1, 4])
-    if ac1.button("➕ Nova NC", type="primary", use_container_width=True):
-        st.session_state["form_nc"] = not st.session_state.get("form_nc", False)
-    ac2.markdown(
-        f'<a href="{LINK_SHEETS}" target="_blank">'
+    ac1, ac2 = st.columns([1, 4])
+    ac1.markdown(
+        f'<a href="{LINK_SHEETS_NC}" target="_blank">'
         f'<button style="background:transparent;color:#64748b;border:1px solid #334155;'
         f'border-radius:6px;padding:8px 12px;font-size:.85rem;cursor:pointer;width:100%;">'
-        f'📊 Planilha</button></a>', unsafe_allow_html=True)
+        f'📊 Planilha da Bda</button></a>', unsafe_allow_html=True)
     saldo_f = sum(parse(nc.get("SALDO NC", 0)) for nc in filtradas)
     receb_f = sum(parse(nc.get("RECEBIDO", 0)) for nc in filtradas)
-    ac3.info(f"**{len(filtradas)}** de {len(ncs)} NCs · Recebido: **{fmt(receb_f)}** · Saldo: **{fmt(saldo_f)}**")
-
-    if st.session_state.get("form_nc"):
-        _form_nc()
+    ac2.info(
+        f"**{len(filtradas)}** de {len(ncs)} NCs · Recebido: **{fmt(receb_f)}** · Saldo: **{fmt(saldo_f)}** · "
+        f"🔒 somente leitura — lançadas e mantidas pela SALC da 1ª Bda Inf Sl"
+    )
 
     if not filtradas:
         st.info("Nenhuma NC encontrada com os filtros aplicados.")
         return
 
-    # ── Tabela enriquecida ─────────────────────────────────────────────
+    # ── Tabela (somente leitura) ─────────────────────────────────────────
     rows = []
     for nc in filtradas:
         d         = _dias_prazo(nc)
@@ -914,98 +901,30 @@ def page_ncs(ncs, reqs=None):
             "EMPENHADO":  fmt(empenhado),
             "SALDO":      fmt(saldo),
             "EMP %":      pct_emp,
-            "SITUAÇÃO":   nc.get("SITUAÇÃO", ""),
         })
 
     df = pd.DataFrame(rows)
-    edited_nc = st.data_editor(
+    st.dataframe(
         df,
         use_container_width=True,
         hide_index=True,
         column_config={
-            "":           st.column_config.TextColumn("",           width=35,  disabled=True),
-            "NC":         st.column_config.TextColumn("NC",         width=130, disabled=True),
-            "ORGÃO":      st.column_config.TextColumn("Órgão",      width=110, disabled=True),
-            "OP":         st.column_config.TextColumn("Operação",   width=80,  disabled=True),
+            "":           st.column_config.TextColumn("",           width=35),
+            "NC":         st.column_config.TextColumn("NC",         width=130),
+            "ORGÃO":      st.column_config.TextColumn("Órgão",      width=110),
+            "OP":         st.column_config.TextColumn("Operação",   width=80),
             "FINALIDADE": st.column_config.TextColumn("Finalidade", width=200),
             "DATA NC":    st.column_config.TextColumn("Data NC",    width=90),
             "PRAZO":      st.column_config.TextColumn("Prazo",      width=90),
-            "RESTAM":     st.column_config.NumberColumn("Restam",   width=75,  disabled=True),
-            "RECEBIDO":   st.column_config.TextColumn("Recebido",   width=130, disabled=True),
-            "EMPENHADO":  st.column_config.TextColumn("Empenhado",  width=130, disabled=True),
-            "SALDO":      st.column_config.TextColumn("Saldo",      width=130, disabled=True),
+            "RESTAM":     st.column_config.NumberColumn("Restam",   width=75),
+            "RECEBIDO":   st.column_config.TextColumn("Recebido",   width=130),
+            "EMPENHADO":  st.column_config.TextColumn("Empenhado",  width=130),
+            "SALDO":      st.column_config.TextColumn("Saldo",      width=130),
             "EMP %":      st.column_config.ProgressColumn("Emp %",
                               format="%.1f%%", min_value=0, max_value=100, width=90),
-            "SITUAÇÃO":   st.column_config.TextColumn("Situação",   width=120, disabled=True),
         },
         key="nc_editor",
     )
-
-    # Detecta alterações em FINALIDADE, DATA NC ou PRAZO
-    nc_changes = []
-    for i, (orig, novo) in enumerate(zip(rows, edited_nc.to_dict("records"))):
-        if (orig["FINALIDADE"] != novo["FINALIDADE"] or
-            orig["DATA NC"]    != novo["DATA NC"] or
-            orig["PRAZO"]      != novo["PRAZO"]):
-            nc_changes.append({
-                "nc":        orig["NC"],
-                "finalidade": novo["FINALIDADE"],
-                "data_nc":   novo["DATA NC"],
-                "prazo":     novo["PRAZO"],
-            })
-
-    if nc_changes:
-        st.info(f"✏️ {len(nc_changes)} NC(s) alterada(s).")
-        if st.button("💾 Salvar alterações NCs", type="primary", key="btn_salvar_ncs"):
-            try:
-                from sheets_nc import atualizar_nc_campos
-                for c in nc_changes:
-                    atualizar_nc_campos(c["nc"], c["finalidade"], c["data_nc"], c["prazo"])
-                carregar(forcar=True)
-                st.success("✅ Alterações salvas!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erro: {e}")
-
-
-def _form_nc():
-    st.divider()
-    st.subheader("➕ Nova Nota de Crédito")
-    with st.form("f_nc", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        nc_num  = c1.text_input("Número NC *",   placeholder="2026NC000000")
-        orgao   = c1.selectbox("Órgão *",        ORGAOS)
-        data_nc = c1.date_input("Data NC *",      value=date.today())
-        pi      = c1.text_input("PI")
-        nd      = c1.text_input("ND",            placeholder="339030")
-        ptres   = c2.text_input("PTRES",         placeholder="251050")
-        om      = c2.text_input("OM",            value=OM_PADRAO)
-        prazo   = c2.date_input("Prazo *")
-        op      = c2.text_input("Operação (OP)")
-        situ    = c2.selectbox("Status",         ["OK", "EM TELA"])
-        finalidade = st.text_area("Finalidade *")
-        valor = st.number_input("Valor (R$) *", min_value=0.0, step=0.01, format="%.2f")
-        s1, s2 = st.columns(2)
-        salvar   = s1.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
-        cancelar = s2.form_submit_button("✖ Cancelar", use_container_width=True)
-        if cancelar:
-            st.session_state["form_nc"] = False; st.rerun()
-        if salvar:
-            if not nc_num or not finalidade or valor <= 0:
-                st.error("Preencha NC, Finalidade e Valor.")
-            else:
-                try:
-                    from sheets_nc import adicionar_nc
-                    adicionar_nc({"NC": nc_num, "ORGÃO": orgao,
-                                  "DATA NC": data_nc.strftime("%d/%m/%Y"),
-                                  "PI": pi, "ND": nd, "PTRES": ptres, "OM": om,
-                                  "PRAZO": prazo.strftime("%d/%m/%Y"), "OP": op,
-                                  "SITU": situ, "FINALIDADE": finalidade, "RECEBIDO": valor})
-                    st.success(f"✅ NC {nc_num} adicionada!")
-                    st.session_state["form_nc"] = False
-                    carregar(forcar=True); st.rerun()
-                except Exception as e:
-                    st.error(f"Erro: {e}")
 
 
 # ── Cache para ler_reqs (evita 429 Quota exceeded) ────────────────────────────
@@ -1020,7 +939,6 @@ def page_reqs(reqs_legado, ncs):
     """Página de Requisições — usa SSAC_REQS (nova aba limpa)."""
     import streamlit.components.v1 as components
     from reqs_crud import atualizar_req, itens_da_req
-    from sheets_nc import atualizar_nc_empenhado, recalcular_empenhados
 
     try:
         reqs = _ler_reqs_cached()
@@ -1082,20 +1000,11 @@ def page_reqs(reqs_legado, ncs):
         filtradas.append(r)
 
     # ── Ações ──────────────────────────────────────────────────────────
-    ac1, ac2, ac3 = st.columns([1, 1, 4])
+    ac1, ac2 = st.columns([1, 4])
     if ac1.button("➕ Nova REQ", type="primary", use_container_width=True):
         st.session_state["form_req"] = not st.session_state.get("form_req", False)
-    if ac2.button("🔄 Recalcular NCs", use_container_width=True):
-        with st.spinner("Recalculando..."):
-            try:
-                resultado = recalcular_empenhados(reqs)
-                carregar(forcar=True)
-                msgs = [f"**{k}**: {v}" for k, v in resultado.items()]
-                st.success("✅ " + " | ".join(msgs) if msgs else "Sem REQs empenhadas.")
-            except Exception as e:
-                st.error(f"Erro: {e}")
     total_f = sum(_val(r) for r in filtradas)
-    ac3.info(f"**{len(filtradas)}** de {len(reqs)} REQs · **{fmt(total_f)}**")
+    ac2.info(f"**{len(filtradas)}** de {len(reqs)} REQs · **{fmt(total_f)}**")
 
     if st.session_state.get("form_req"):
         _form_req_novo(ncs)
@@ -1177,20 +1086,11 @@ def page_reqs(reqs_legado, ncs):
             ba, bb = st.columns(2)
             if ba.button("💾 Salvar alterações", type="primary",
                          use_container_width=True, key="det_salvar"):
-                sit_ant = r_d.get("SITUACAO", "")
                 try:
                     _editar(detail_req, {**r_d,
                         "EMPRESA": emp, "CNPJ": cnpj, "PREGAO": pregao,
                         "NE": ne, "ENTRADA_SALC": entrada,
                         "OBS": obs, "SITUACAO": sit, "VALOR": val_e})
-                    nc, val = r_d.get("NC", ""), _val(r_d)
-                    if nc and val:
-                        if sit == "Empenhada" and sit_ant != "Empenhada":
-                            try: atualizar_nc_empenhado(nc, val)
-                            except Exception as e: st.warning(f"NC não atualizada: {e}")
-                        elif sit == "Anulado" and sit_ant != "Anulado":
-                            try: atualizar_nc_empenhado(nc, -val)
-                            except Exception as e: st.warning(f"NC não atualizada: {e}")
                     _ler_reqs_cached.clear()
                     st.session_state.pop("req_table", None)
                     st.success("✅ REQ atualizada!")
@@ -1620,56 +1520,22 @@ def _form_req_novo(ncs):
 
 # ── Lançar por PDF / HTML ─────────────────────────────────────────────────────
 def page_pdf(ncs):
-    st.title("📄 Lançar por PDF ou HTML")
+    st.title("📄 Lançar Requisição por PDF ou HTML")
+    st.caption("🔒 NCs são somente leitura (vêm da planilha da Bda) — este lançamento é só para Requisições.")
     if not ANTHROPIC_API_KEY:
         st.error("⚠️ Configure ANTHROPIC_API_KEY para usar este recurso.")
         return
-    tipo = st.radio("Tipo", ["Nota de Crédito (NC)", "Requisição (REQ)"], horizontal=True)
     uploaded = st.file_uploader("Selecione o arquivo", type=["pdf", "html", "htm"])
     if uploaded:
         with st.spinner("🤖 Analisando documento..."):
             try:
-                from extrator_pdf import extrair_nc, extrair_req
+                from extrator_pdf import extrair_req
                 b = uploaded.read()
-                if "NC" in tipo:
-                    dados = extrair_nc(b, uploaded.name)
-                    st.success("✅ Dados extraídos — revise e confirme.")
-                    _confirmar_nc(dados)
-                else:
-                    dados = extrair_req(b, uploaded.name)
-                    st.success("✅ Dados extraídos — revise e confirme.")
-                    _confirmar_req(dados, ncs)
+                dados = extrair_req(b, uploaded.name)
+                st.success("✅ Dados extraídos — revise e confirme.")
+                _confirmar_req(dados, ncs)
             except Exception as e:
                 st.error(f"Erro na extração: {e}")
-
-
-def _confirmar_nc(dados):
-    st.divider(); st.subheader("✅ Confirmar NC")
-    with st.form("f_pdf_nc"):
-        c1, c2 = st.columns(2)
-        nc      = c1.text_input("Número NC",            value=dados.get("NC", ""))
-        orgao   = c1.text_input("Órgão",                value=dados.get("ORGÃO", ""))
-        data_nc = c1.text_input("Data NC (DD/MM/YYYY)", value=dados.get("DATA NC", ""))
-        pi      = c1.text_input("PI",                   value=dados.get("PI", ""))
-        nd      = c1.text_input("ND",                   value=dados.get("ND", ""))
-        ptres   = c2.text_input("PTRES",                value=dados.get("PTRES", ""))
-        om      = c2.text_input("OM",                   value=dados.get("OM", OM_PADRAO))
-        prazo   = c2.text_input("Prazo (DD/MM/YYYY)",   value=dados.get("PRAZO", ""))
-        op      = c2.text_input("Operação",             value=dados.get("OP", ""))
-        situ    = c2.selectbox("Status", ["OK", "EM TELA"], index=1 if dados.get("SITU") == "EM TELA" else 0)
-        finalidade = st.text_area("Finalidade", value=dados.get("FINALIDADE", ""))
-        valor = st.number_input("Valor (R$)", value=float(dados.get("RECEBIDO", 0) or 0),
-                                min_value=0.0, step=0.01, format="%.2f")
-        if st.form_submit_button("💾 Confirmar e Salvar", type="primary", use_container_width=True):
-            try:
-                from sheets_nc import adicionar_nc
-                adicionar_nc({"NC": nc, "ORGÃO": orgao, "DATA NC": data_nc, "PI": pi, "ND": nd,
-                              "PTRES": ptres, "OM": om, "PRAZO": prazo, "OP": op, "SITU": situ,
-                              "FINALIDADE": finalidade, "RECEBIDO": valor})
-                st.success(f"✅ NC {nc} lançada!")
-                carregar(forcar=True)
-            except Exception as e:
-                st.error(f"Erro: {e}")
 
 
 def _confirmar_req(dados, ncs):
@@ -1712,9 +1578,13 @@ def page_importar(ncs, reqs):
     k3.metric("NCs OK",          sum(1 for nc in ncs if nc.get("SITU") == "OK"))
     k4.metric("REQs Pendentes",  sum(1 for r  in reqs if r.get("SITUAÇÃO") == "Pendente"))
 
-    st.info(f"🔗 Planilha: `{SHEET_ID_NC[:30]}...`  ·  Sync automático a cada 2 min.")
-    st.markdown(f'<a href="{LINK_SHEETS}" target="_blank">📊 Abrir planilha no Google Sheets ↗</a>',
-                unsafe_allow_html=True)
+    st.info(
+        f"🔗 Requisições: `{SHEET_ID_NC[:30]}...`  ·  NCs (somente leitura): planilha da Bda  ·  "
+        f"Sync automático a cada 2 min."
+    )
+    lc1, lc2 = st.columns(2)
+    lc1.markdown(f'<a href="{LINK_SHEETS}" target="_blank">📊 Planilha do SSAC (REQs) ↗</a>', unsafe_allow_html=True)
+    lc2.markdown(f'<a href="{LINK_SHEETS_NC}" target="_blank">📊 Planilha de NCs (Bda) ↗</a>', unsafe_allow_html=True)
 
     if st.button("🔄 Forçar Sincronização", type="primary"):
         with st.spinner("Sincronizando..."):
@@ -1722,8 +1592,8 @@ def page_importar(ncs, reqs):
         st.success("✅ Dados atualizados!"); st.rerun()
 
     st.divider()
-    st.subheader("📂 Importar de Arquivo (Excel / CSV)")
-    tipo_imp = st.radio("O que importar?", ["Notas de Crédito (NCs)", "Requisições (REQs)"], horizontal=True)
+    st.subheader("📂 Importar Requisições de Arquivo (Excel / CSV)")
+    st.caption("🔒 NCs são somente leitura e não podem ser importadas por aqui.")
     arq = st.file_uploader("Selecione o arquivo", type=["xlsx", "xls", "csv"])
 
     if arq:
@@ -1734,15 +1604,12 @@ def page_importar(ncs, reqs):
             st.dataframe(df_imp.head(10), use_container_width=True, hide_index=True)
 
             if st.button(f"⬆️ Importar {len(df_imp)} linha(s)", type="primary"):
-                from sheets_nc import adicionar_nc, adicionar_req
+                from sheets_nc import adicionar_req
                 erros = 0
                 bar = st.progress(0)
                 for i, (_, row) in enumerate(df_imp.iterrows()):
                     try:
-                        if "NCs" in tipo_imp:
-                            adicionar_nc(row.to_dict())
-                        else:
-                            adicionar_req(row.to_dict())
+                        adicionar_req(row.to_dict())
                     except Exception:
                         erros += 1
                     bar.progress((i + 1) / len(df_imp))

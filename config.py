@@ -26,7 +26,6 @@ OUTPUT_DIR           = _s("OUTPUT_DIR", "output")
 # --- Controle de NCs ---
 ANTHROPIC_API_KEY    = _s("ANTHROPIC_API_KEY")
 SHEET_ID_NC          = _s("SHEET_ID_NC") or _s("GOOGLE_SHEET_ID", "1AnOjrKRqCD4Y3lqjlfWPVytYDeY6xLVQXil9rCkCFio")
-ABA_NCS              = _s("ABA_NCS",  "NC 2026")
 ABA_REQS             = _s("ABA_REQS", "REQUISIÇÕES DE EMPENHOS")
 ABA_SSAC_REQS        = _s("ABA_SSAC_REQS", "SSAC_REQS")
 ABA_FORNECEDORES     = _s("ABA_FORNECEDORES", "AGENDA")
@@ -35,3 +34,10 @@ OM_PADRAO            = _s("OM",  "10º GAC Sl")
 DRIVE_FOLDER_ID      = _s("DRIVE_FOLDER_ID", "")
 EMAIL_SENDER         = _s("EMAIL_SENDER",  "")   # ex: sac10gacsl@gmail.com
 EMAIL_PASSWORD       = _s("EMAIL_PASSWORD", "")  # senha de app do Gmail
+
+# --- NCs: planilha de controle de crédito da 1ª Bda Inf Sl (somente leitura) ---
+# O SSAC não edita NCs — elas são lançadas e mantidas pela SALC da Bda.
+# Lemos as abas por UG e filtramos pela coluna RESP (responsável) = RESP_PADRAO.
+SHEET_ID_NC_ORIGEM   = _s("SHEET_ID_NC_ORIGEM", "1PhxwM7BLauZQEYNyR7P-T2i2huwyGLaUAy3YVJpD-fs")
+ABAS_NC_ORIGEM       = [a.strip() for a in _s("ABAS_NC_ORIGEM", "160482,160487").split(",") if a.strip()]
+RESP_PADRAO          = _s("RESP_PADRAO", "10º GAC Sl")
