@@ -719,12 +719,15 @@ def page_dashboard(ncs, reqs):
         if em_tela:
             total_et = sum(parse(nc.get("RECEBIDO", 0)) for nc in em_tela)
             st.warning(f"⚠️ {len(em_tela)} NCs em tela — {fmt(total_et)}")
+            status_map = _status_ncs_cached()
             df_et = pd.DataFrame([{
                 "NC": nc.get("NC", ""), "ÓRGÃO": nc.get("ORGÃO", ""),
                 "Finalidade": nc.get("FINALIDADE", "")[:38],
                 "Valor": nc.get("RECEBIDO", ""), "Prazo": nc.get("PRAZO", ""),
+                "Etapa": status_map.get(nc.get("NC", ""), "") or "—",
             } for nc in em_tela])
             st.dataframe(df_et, use_container_width=True, hide_index=True, height=240)
+            st.caption("Defina a etapa de cada NC na página **Notas de Crédito**.")
         else:
             st.success("✅ Nenhuma NC EM TELA no momento.")
 
@@ -879,7 +882,29 @@ def page_ncs(ncs, reqs=None):
         st.info("Nenhuma NC encontrada com os filtros aplicados.")
         return
 
-    # ── Tabela (somente leitura) ─────────────────────────────────────────
+    # ── Situação das NCs EM TELA ─────────────────────────────────────────
+    from nc_status import ETAPAS_NC, definir_status_ncs
+    status_map = _status_ncs_cached()
+
+    if em_tela:
+        st.subheader("🎯 Situação das NCs EM TELA")
+        st.caption("Etapa registrada pelo GAC para cada NC — ajuda a ver onde agir para baixar o total parado.")
+        contagem: dict[str, dict] = {}
+        for nc in em_tela:
+            etapa = status_map.get(nc.get("NC", ""), "") or "Sem etapa definida"
+            d = contagem.setdefault(etapa, {"qtd": 0, "valor": 0.0})
+            d["qtd"] += 1
+            d["valor"] += parse(nc.get("EM TELA", 0)) or parse(nc.get("RECEBIDO", 0))
+        ordem = ["Sem etapa definida"] + ETAPAS_NC
+        cols = st.columns(len(contagem) or 1)
+        for i, etapa in enumerate(sorted(contagem, key=lambda e: ordem.index(e) if e in ordem else 99)):
+            d = contagem[etapa]
+            with cols[i % len(cols)]:
+                _kpi_card(etapa, str(d["qtd"]), fmt(d["valor"]),
+                          color="#ef4444" if etapa == "Sem etapa definida" else "#fbbf24")
+        st.divider()
+
+    # ── Tabela ────────────────────────────────────────────────────────────
     rows = []
     for nc in filtradas:
         d         = _dias_prazo(nc)
@@ -901,30 +926,61 @@ def page_ncs(ncs, reqs=None):
             "EMPENHADO":  fmt(empenhado),
             "SALDO":      fmt(saldo),
             "EMP %":      pct_emp,
+            "ETAPA":      status_map.get(nc_num, ""),
         })
 
     df = pd.DataFrame(rows)
-    st.dataframe(
+    edited_nc = st.data_editor(
         df,
         use_container_width=True,
         hide_index=True,
         column_config={
-            "":           st.column_config.TextColumn("",           width=35),
-            "NC":         st.column_config.TextColumn("NC",         width=130),
-            "ORGÃO":      st.column_config.TextColumn("Órgão",      width=110),
-            "OP":         st.column_config.TextColumn("Operação",   width=80),
-            "FINALIDADE": st.column_config.TextColumn("Finalidade", width=200),
-            "DATA NC":    st.column_config.TextColumn("Data NC",    width=90),
-            "PRAZO":      st.column_config.TextColumn("Prazo",      width=90),
-            "RESTAM":     st.column_config.NumberColumn("Restam",   width=75),
-            "RECEBIDO":   st.column_config.TextColumn("Recebido",   width=130),
-            "EMPENHADO":  st.column_config.TextColumn("Empenhado",  width=130),
-            "SALDO":      st.column_config.TextColumn("Saldo",      width=130),
+            "":           st.column_config.TextColumn("",           width=35,  disabled=True),
+            "NC":         st.column_config.TextColumn("NC",         width=130, disabled=True),
+            "ORGÃO":      st.column_config.TextColumn("Órgão",      width=110, disabled=True),
+            "OP":         st.column_config.TextColumn("Operação",   width=80,  disabled=True),
+            "FINALIDADE": st.column_config.TextColumn("Finalidade", width=200, disabled=True),
+            "DATA NC":    st.column_config.TextColumn("Data NC",    width=90,  disabled=True),
+            "PRAZO":      st.column_config.TextColumn("Prazo",      width=90,  disabled=True),
+            "RESTAM":     st.column_config.NumberColumn("Restam",   width=75,  disabled=True),
+            "RECEBIDO":   st.column_config.TextColumn("Recebido",   width=130, disabled=True),
+            "EMPENHADO":  st.column_config.TextColumn("Empenhado",  width=130, disabled=True),
+            "SALDO":      st.column_config.TextColumn("Saldo",      width=130, disabled=True),
             "EMP %":      st.column_config.ProgressColumn("Emp %",
                               format="%.1f%%", min_value=0, max_value=100, width=90),
+            "ETAPA":      st.column_config.SelectboxColumn("Etapa (GAC)", width=200,
+                              options=[""] + ETAPAS_NC),
         },
         key="nc_editor",
     )
+
+    etapa_changes = {
+        orig["NC"]: novo["ETAPA"]
+        for orig, novo in zip(rows, edited_nc.to_dict("records"))
+        if orig["ETAPA"] != novo["ETAPA"]
+    }
+    if etapa_changes:
+        st.info(f"✏️ {len(etapa_changes)} NC(s) com etapa alterada.")
+        if st.button("💾 Salvar situações", type="primary", key="btn_salvar_etapas"):
+            try:
+                definir_status_ncs(etapa_changes)
+                _status_ncs_cached.clear()
+                st.success("✅ Situação salva!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro: {e}")
+
+    # ── Atalho: gerar REQ a partir de uma NC EM TELA ─────────────────────
+    if em_tela:
+        st.divider()
+        st.subheader("⚡ Agir sobre uma NC EM TELA")
+        opts = [f"{nc.get('NC','')} · {nc.get('ORGÃO','')} · {nc.get('FINALIDADE','')[:50]}" for nc in em_tela]
+        sel = st.selectbox("Escolha a NC", opts, key="nc_shortcut_sel")
+        if st.button("⚡ Gerar REQ a partir desta NC", type="primary", key="btn_nc_shortcut"):
+            nc_escolhida = em_tela[opts.index(sel)]
+            st.session_state["gerar_nc_sel"] = nc_escolhida.get("NC", "")
+            st.session_state["page"] = "gerar_req"
+            st.rerun()
 
 
 # ── Cache para ler_reqs (evita 429 Quota exceeded) ────────────────────────────
@@ -932,6 +988,12 @@ def page_ncs(ncs, reqs=None):
 def _ler_reqs_cached():
     from reqs_crud import ler_reqs
     return ler_reqs()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _status_ncs_cached():
+    from nc_status import ler_status_ncs
+    return ler_status_ncs()
 
 
 # ── Requisições ───────────────────────────────────────────────────────────────
