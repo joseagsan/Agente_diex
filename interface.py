@@ -1855,14 +1855,7 @@ def page_assistente(ncs, reqs):
 # ── Gerar REQ ────────────────────────────────────────────────────────────────
 def page_gerar_req(reqs, ncs):
     st.title("📃 Gerar Requisição de Empenho")
-
-    from config import TEMPLATE_PATH
-    import os
-
-    if not os.path.exists(TEMPLATE_PATH):
-        st.error(f"Template não encontrado: `{TEMPLATE_PATH}`")
-        st.info("Coloque `requisicao_empenho_fiel_placeholders.docx` em `templates/`.")
-        return
+    st.caption("Processo 100% via SPED — gera o texto da Requisição pronto para colar no editor.")
 
     if "req_itens" not in st.session_state:
         st.session_state.req_itens = []
@@ -2403,11 +2396,16 @@ def page_gerar_req(reqs, ncs):
     else:
         st.info("Nenhum item adicionado ainda.")
 
-    # ── 4. Gerar
+    # ── 4. Gerar texto para o SPED ────────────────────────────────────
     st.divider()
-    st.subheader("4. Gerar Documento")
+    st.subheader("4. Gerar Texto para o SPED")
+    st.caption("Processo 100% digital — sem DOCX. Copie o texto abaixo e cole direto no editor do SPED.")
 
-    if st.button("📄 Gerar DOCX", type="primary"):
+    as1, as2 = st.columns(2)
+    assinante = as1.text_input("Assinante (nome e posto) — opcional", key="_fi_assinante")
+    cargo     = as2.text_input("Cargo — opcional", key="_fi_cargo")
+
+    if st.button("📄 Gerar Texto para o SPED", type="primary"):
         campos = st.session_state.get("campos_req", {})
         itens  = st.session_state.req_itens
 
@@ -2416,68 +2414,59 @@ def page_gerar_req(reqs, ncs):
         elif not itens:
             st.error("Adicione pelo menos um item (Bloco 3).")
         else:
-            try:
-                from gerador import gerar_para_bytes
+            from requisicao_sped import gerar_texto_req_sped
 
-                _b2v      = st.session_state.get("_b2_ver", 0)
-                b2_modal  = st.session_state.get(f"b2_modal_{_b2v}", "PREGÃO")
-                b2_pregao = st.session_state.get("_b2_pregao") or st.session_state.get(f"b2_pregao_{_b2v}", "")
-                b2_ug     = st.session_state.get("_b2_ug") or st.session_state.get(f"b2_ug_{_b2v}", "")
-                b2_forn   = st.session_state.get("_b2_forn") or st.session_state.get(f"b2_forn_{_b2v}", "")
-                b2_cnpj   = st.session_state.get("_b2_cnpj") or st.session_state.get(f"b2_cnpj_{_b2v}", "")
-                b2_vig    = st.session_state.get("_b2_vig") or st.session_state.get(f"b2_vig_{_b2v}", "")
-                modalidade  = f"{b2_modal} - {b2_pregao} {b2_ug}".strip(" -")
-                total_geral = sum(i["_total"] for i in itens)
-                campos_finais = {
-                    **campos,
-                    "FORNECEDOR_NOME": b2_forn,
-                    "FORNECEDOR_CNPJ": _formatar_cnpj(b2_cnpj),
-                    "MODALIDADE":      modalidade,
-                    "VIGENCIA_DA_ATA": b2_vig,
-                    "TOTAL":           fmt(total_geral),
-                }
-                itens_limpos = [{k: v for k, v in i.items() if not k.startswith("_")} for i in itens]
-                doc_bytes    = gerar_para_bytes(TEMPLATE_PATH, campos_finais, itens_limpos)
-                nome_arq     = f"REQ_{campos.get('requisition_id', 'doc')}.docx"
+            _b2v      = st.session_state.get("_b2_ver", 0)
+            b2_modal  = st.session_state.get(f"b2_modal_{_b2v}", "PREGÃO").title()
+            b2_pregao = st.session_state.get("_b2_pregao") or st.session_state.get(f"b2_pregao_{_b2v}", "")
+            b2_ug     = st.session_state.get("_b2_ug") or st.session_state.get(f"b2_ug_{_b2v}", "")
+            b2_forn   = st.session_state.get("_b2_forn") or st.session_state.get(f"b2_forn_{_b2v}", "")
+            b2_cnpj   = st.session_state.get("_b2_cnpj") or st.session_state.get(f"b2_cnpj_{_b2v}", "")
+            total_geral  = sum(i["_total"] for i in itens)
+            itens_limpos = [{k: v for k, v in i.items() if not k.startswith("_")} for i in itens]
 
-                st.session_state["_doc_bytes"]        = doc_bytes
-                st.session_state["_doc_nome"]         = nome_arq
-                st.session_state["_doc_campos"]       = campos_finais
-                st.session_state["_doc_itens_limpos"] = itens_limpos
-                st.session_state["_doc_total"]        = total_geral
-                st.session_state["_doc_req_cadastrada"] = False
-            except Exception as e:
-                st.error(f"Erro ao gerar documento: {e}")
+            campos_sped = {
+                "REQ_ID":          campos.get("requisition_id", ""),
+                "OM":              campos.get("OM", OM_PADRAO),
+                "DATA":            data_req,
+                "ASSUNTO":         campos.get("ASSUNTO", ""),
+                "MODALIDADE":      b2_modal,
+                "PREGAO":          b2_pregao,
+                "UASG":            b2_ug,
+                "TIPO":            campos.get("TIPO", ""),
+                "UG_NC":           nc_d.get("UG", "") or campos.get("UG", ""),
+                "ORGAO_NC":        nc_d.get("ORGÃO", ""),
+                "NC":              nc_sel,
+                "DATA_NC":         nc_d.get("DATA NC", ""),
+                "PI":              campos.get("PI", ""),
+                "ND":              campos.get("ND", ""),
+                "FORNECEDOR_NOME": b2_forn,
+                "FORNECEDOR_CNPJ": _formatar_cnpj(b2_cnpj),
+                "JUSTIFICATIVA":   campos.get("JUSTIFICATIVA", ""),
+                "ASSINANTE":       assinante,
+                "CARGO":           cargo,
+            }
+            texto_sped = gerar_texto_req_sped(campos_sped, itens_limpos)
 
-    # ── Downloads ─────────────────────────────────────────────────────
-    if st.session_state.get("_doc_bytes"):
-        nome_arq  = st.session_state.get("_doc_nome", "REQ.docx")
-        doc_bytes = st.session_state["_doc_bytes"]
+            st.session_state["_sped_texto"]         = texto_sped
+            st.session_state["_sped_campos"]        = campos_sped
+            st.session_state["_sped_itens_limpos"]  = itens_limpos
+            st.session_state["_sped_total"]         = total_geral
+            st.session_state["_sped_nc_sel"]        = nc_sel
+            st.session_state["_sped_req_cadastrada"] = False
 
+    # ── Texto pronto + cadastro ──────────────────────────────────────
+    if st.session_state.get("_sped_texto"):
+        st.code(st.session_state["_sped_texto"], language=None)
         st.download_button(
-            "⬇️ Baixar DOCX",
-            data=doc_bytes,
-            file_name=nome_arq,
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "⬇️ Baixar .txt",
+            data=st.session_state["_sped_texto"].encode("utf-8"),
+            file_name=f"REQ_{st.session_state['_sped_campos'].get('REQ_ID') or 'doc'}.txt",
+            mime="text/plain",
             use_container_width=True,
         )
 
-        # HTML para download e visualização na aba Requisições
-        if not st.session_state.get("_doc_html_bytes"):
-            try:
-                from gerador_req_html import gerar_html_req
-                html = gerar_html_req(st.session_state.get("_doc_campos", {}),
-                                      st.session_state.get("_doc_itens_limpos", []))
-                st.session_state["_doc_html_bytes"] = html.encode("utf-8")
-            except Exception:
-                pass
-        if st.session_state.get("_doc_html_bytes"):
-            nome_html = nome_arq.replace(".docx", ".html")
-            st.download_button("⬇️ Baixar HTML", data=st.session_state["_doc_html_bytes"],
-                               file_name=nome_html, mime="text/html",
-                               use_container_width=True)
-
-        if st.session_state.get("_doc_req_cadastrada"):
+        if st.session_state.get("_sped_req_cadastrada"):
             st.success("✅ Requisição cadastrada!")
         else:
             st.info("📋 Deseja cadastrar esta requisição na planilha?")
@@ -2485,31 +2474,30 @@ def page_gerar_req(reqs, ncs):
             if cad1.button("✅ Sim, cadastrar", type="primary", use_container_width=True, key="btn_cad_sim"):
                 try:
                     from reqs_crud import adicionar_req as adicionar_req_novo
-                    cf        = st.session_state["_doc_campos"]
-                    itens_lim = st.session_state.get("_doc_itens_limpos", [])
-                    req_num   = cf.get("requisition_id", "")
+                    cf        = st.session_state["_sped_campos"]
+                    itens_lim = st.session_state.get("_sped_itens_limpos", [])
                     adicionar_req_novo({
-                        "REQ":     req_num,
-                        "DATA":    cf.get("LOCAL_DATA", date.today().strftime("%d/%m/%Y")),
-                        "NC":      st.session_state.get("gerar_nc_sel", ""),
-                        "NE":      cf.get("NE", ""),
+                        "REQ":     cf.get("REQ_ID", ""),
+                        "DATA":    data_req.strftime("%d/%m/%Y") if data_req else date.today().strftime("%d/%m/%Y"),
+                        "NC":      st.session_state.get("_sped_nc_sel", ""),
+                        "NE":      "",
                         "PI":      cf.get("PI", ""),
                         "ND":      cf.get("ND", ""),
                         "EMPRESA": cf.get("FORNECEDOR_NOME", ""),
                         "CNPJ":    cf.get("FORNECEDOR_CNPJ", ""),
-                        "PREGAO":  cf.get("MODALIDADE", ""),
+                        "PREGAO":  f"{cf.get('MODALIDADE','')} {cf.get('PREGAO','')}".strip(),
                         "TIPO":    cf.get("TIPO", "Ordinário"),
-                        "VALOR":   st.session_state.get("_doc_total", 0.0),
+                        "VALOR":   st.session_state.get("_sped_total", 0.0),
                         "SITUACAO": "Pendente",
                         "ITENS":   itens_lim,
                     })
                     _ler_reqs_cached.clear()
-                    st.session_state["_doc_req_cadastrada"] = True
+                    st.session_state["_sped_req_cadastrada"] = True
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao cadastrar: {e}")
             if cad2.button("✖ Não", use_container_width=True, key="btn_cad_nao"):
-                st.session_state["_doc_req_cadastrada"] = True
+                st.session_state["_sped_req_cadastrada"] = True
                 st.rerun()
 
 
