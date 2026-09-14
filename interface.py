@@ -2414,7 +2414,7 @@ def page_gerar_req(reqs, ncs):
         elif not itens:
             st.error("Adicione pelo menos um item (Bloco 3).")
         else:
-            from requisicao_sped import gerar_texto_req_sped
+            from requisicao_sped import gerar_texto_req_sped, gerar_html_req_sped
 
             _b2v      = st.session_state.get("_b2_ver", 0)
             b2_modal  = st.session_state.get(f"b2_modal_{_b2v}", "PREGÃO").title()
@@ -2447,8 +2447,10 @@ def page_gerar_req(reqs, ncs):
                 "CARGO":           cargo,
             }
             texto_sped = gerar_texto_req_sped(campos_sped, itens_limpos)
+            html_sped  = gerar_html_req_sped(campos_sped, itens_limpos)
 
             st.session_state["_sped_texto"]         = texto_sped
+            st.session_state["_sped_html"]          = html_sped
             st.session_state["_sped_campos"]        = campos_sped
             st.session_state["_sped_itens_limpos"]  = itens_limpos
             st.session_state["_sped_total"]         = total_geral
@@ -2457,7 +2459,18 @@ def page_gerar_req(reqs, ncs):
 
     # ── Texto pronto + cadastro ──────────────────────────────────────
     if st.session_state.get("_sped_texto"):
-        st.code(st.session_state["_sped_texto"], language=None)
+        tab_tabela, tab_texto = st.tabs(["📋 Com tabela (recomendado)", "🔤 Texto simples"])
+        with tab_tabela:
+            st.caption("Selecione tudo aqui dentro (Ctrl+A / Cmd+A) e copie — ao colar no SPED a tabela vem com colunas de verdade.")
+            st.markdown(
+                f'<div style="background:#fff;border:1px solid #ddd;border-radius:6px;padding:18px 22px;">'
+                f'{st.session_state["_sped_html"]}</div>',
+                unsafe_allow_html=True,
+            )
+        with tab_texto:
+            st.caption("Texto puro (sem tabela) — use se o campo do SPED não aceitar colar formatado.")
+            st.code(st.session_state["_sped_texto"], language=None)
+
         st.download_button(
             "⬇️ Baixar .txt",
             data=st.session_state["_sped_texto"].encode("utf-8"),
