@@ -20,34 +20,36 @@ st.set_page_config(
 logging.basicConfig(level=logging.INFO)
 
 from auth import logout, requer_auth
-from config import ANTHROPIC_API_KEY, OM_PADRAO, UG_PADRAO, SHEET_ID_NC
+from config import ANTHROPIC_API_KEY, OM_PADRAO, UG_PADRAO, SHEET_ID_NC, SHEET_ID_NC_ORIGEM, RESP_PADRAO
 from relatorios import (
     exportar_excel, kpis, ncs_por_operacao, ncs_vencendo,
     relatorio_extrato_nc, relatorio_por_empresa, relatorio_saldo_pi, relatorio_saldo_nd,
 )
 
 # ── Tema ─────────────────────────────────────────────────────────────────────
+# Paleta institucional (verde-oliva do Exército) refinada para melhor contraste
+# e uma hierarquia visual mais clara entre navegação, cartões e conteúdo.
 _DARK = dict(
-    bg="transparent", card_bg="#0d1829", card_border="#1a2540",
-    text="#e2e8f0", subtext="#64748b", accent="#34d399",
-    sidebar_bg="#080e1a", sidebar_border="#1a2540",
-    nav_color="#4b6080", nav_hover_bg="#0f1f35", nav_hover_color="#c8d8e8",
-    active_bg="linear-gradient(135deg,#052918,#073d22)", active_border="#0a4a2840",
-    active_color="#34d399",
+    bg="transparent", card_bg="#101c2c", card_border="#1e2d42",
+    text="#e7edf5", subtext="#7387a3", accent="#3ddc97",
+    sidebar_bg="#0a1220", sidebar_border="#1e2d42",
+    nav_color="#5b7291", nav_hover_bg="#132238", nav_hover_color="#d3e0f0",
+    active_bg="linear-gradient(135deg,#0b3d26,#0f5934)", active_border="#1a6b4340",
+    active_color="#3ddc97",
     plot_bg="rgba(0,0,0,0)", paper_bg="rgba(0,0,0,0)",
-    grid="#1a2540", font_color="#64748b",
-    bar_recv="#3b82f6", bar_emp="#10b981", bar_saldo="#34d399",
+    grid="#1e2d42", font_color="#7387a3",
+    bar_recv="#4c8ef0", bar_emp="#17b17a", bar_saldo="#3ddc97",
 )
 _LIGHT = dict(
-    bg="transparent", card_bg="#ffffff", card_border="#e0e0e0",
-    text="#1a1a2e", subtext="#555555", accent="#449D44",
-    sidebar_bg="#2d4a2d", sidebar_border="#3a5c3a",
-    nav_color="#8fac8f", nav_hover_bg="#3a5c3a", nav_hover_color="#f0faf0",
-    active_bg="linear-gradient(135deg,#3b8c3b,#449D44)", active_border="#449D4460",
-    active_color="#f0faf0",
+    bg="transparent", card_bg="#ffffff", card_border="#e2e6df",
+    text="#1c2a1c", subtext="#5a6b5a", accent="#3f8c3f",
+    sidebar_bg="#22381f", sidebar_border="#33502e",
+    nav_color="#9db998", nav_hover_bg="#33502e", nav_hover_color="#f2faf0",
+    active_bg="linear-gradient(135deg,#3a7a3a,#4a9a4a)", active_border="#4a9a4a60",
+    active_color="#f2faf0",
     plot_bg="rgba(255,255,255,0)", paper_bg="rgba(255,255,255,0)",
-    grid="#dee2e6", font_color="#555555",
-    bar_recv="#337ab7", bar_emp="#449D44", bar_saldo="#27ae60",
+    grid="#e2e6df", font_color="#5a6b5a",
+    bar_recv="#3a72a8", bar_emp="#3f8c3f", bar_saldo="#2e9e5b",
 )
 
 
@@ -211,8 +213,6 @@ def _cl() -> dict:
         legend=dict(orientation="h", y=1.15, font=dict(size=11)),
     )
 
-
-ORGAOS = ["COTER", "COEX", "DGO", "DEC", "DECEX", "12 RM", "Outro"]
 
 SUBITENS: dict[str, list[str]] = {
     "339030 – Material de Consumo": [
@@ -395,17 +395,29 @@ TIPOS_RELATORIO = [
     "NCs por Operação", "NCs Próximas do Vencimento (30 dias)", "REQs Pendentes",
     "Extrato por NC", "REQs por Empresa", "Saldo por PI", "Saldo por ND",
 ]
-NAV = [
-    ("📊", "Dashboard",        "dashboard"),
-    ("📋", "Notas de Crédito", "ncs"),
-    ("📝", "Requisições",      "reqs"),
-    ("📃", "Gerar REQ",        "gerar_req"),
-    ("📥", "Importar Dados",   "importar"),
-    ("📄", "Lançar Documento", "pdf"),
-    ("🤖", "Assistente",       "assistente"),
-    ("📈", "Relatórios",       "relatorios"),
+# Navegação agrupada por seção — facilita achar a página certa em um menu
+# que cresceu ao longo do tempo.
+NAV_GRUPOS = [
+    ("Visão Geral", [
+        ("📊", "Dashboard", "dashboard"),
+    ]),
+    ("Créditos & Requisições", [
+        ("📋", "Notas de Crédito", "ncs"),
+        ("📝", "Requisições",      "reqs"),
+        ("📃", "Gerar REQ",        "gerar_req"),
+    ]),
+    ("Dados & Documentos", [
+        ("📥", "Importar Dados",   "importar"),
+        ("📄", "Lançar Documento", "pdf"),
+    ]),
+    ("Ferramentas", [
+        ("🤖", "Assistente",  "assistente"),
+        ("📈", "Relatórios",  "relatorios"),
+    ]),
 ]
+NAV = [item for _, itens in NAV_GRUPOS for item in itens]
 LINK_SHEETS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID_NC}/edit"
+LINK_SHEETS_NC = f"https://docs.google.com/spreadsheets/d/{SHEET_ID_NC_ORIGEM}/edit"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -458,15 +470,19 @@ def carregar(forcar: bool = False):
     try:
         return _load()
     except Exception as e:
-        abas_hint = ""
+        from config import SHEET_ID_NC_ORIGEM
+        hint = ""
         try:
             from sheets_nc import listar_abas
-            abas = listar_abas()
-            if abas:
-                abas_hint = f"\n\nAbas disponíveis: **{', '.join(abas)}**"
+            abas_nc = listar_abas(SHEET_ID_NC_ORIGEM)
+            if abas_nc:
+                hint += f"\n\nAbas da planilha de NCs (Bda): **{', '.join(abas_nc)}**"
+            abas_ssac = listar_abas()
+            if abas_ssac:
+                hint += f"\n\nAbas da planilha do SSAC: **{', '.join(abas_ssac)}**"
         except Exception:
             pass
-        st.error(f"Erro ao carregar planilha: {e}{abas_hint}")
+        st.error(f"Erro ao carregar planilha: {e}{hint}")
         return [], [], []
 
 
@@ -483,12 +499,19 @@ def _sidebar(ncs, reqs) -> str:
         </div>""", unsafe_allow_html=True)
 
         current = st.session_state.get("page", "dashboard")
-        for icon, label, page_id in NAV:
-            if st.button(f"{icon}  {label}", key=f"nav_{page_id}",
-                         use_container_width=True,
-                         type="primary" if current == page_id else "secondary"):
-                st.session_state["page"] = page_id
-                st.rerun()
+        for gi, (secao, itens) in enumerate(NAV_GRUPOS):
+            st.markdown(
+                f'<div style="padding:{4 if gi==0 else 12}px 10px 4px;font-size:.62rem;'
+                f'font-weight:700;text-transform:uppercase;letter-spacing:.8px;'
+                f'color:{t["nav_color"]};opacity:.75;">{secao}</div>',
+                unsafe_allow_html=True,
+            )
+            for icon, label, page_id in itens:
+                if st.button(f"{icon}  {label}", key=f"nav_{page_id}",
+                             use_container_width=True,
+                             type="primary" if current == page_id else "secondary"):
+                    st.session_state["page"] = page_id
+                    st.rerun()
 
         st.divider()
 
@@ -696,12 +719,15 @@ def page_dashboard(ncs, reqs):
         if em_tela:
             total_et = sum(parse(nc.get("RECEBIDO", 0)) for nc in em_tela)
             st.warning(f"⚠️ {len(em_tela)} NCs em tela — {fmt(total_et)}")
+            status_map = _status_ncs_cached()
             df_et = pd.DataFrame([{
                 "NC": nc.get("NC", ""), "ÓRGÃO": nc.get("ORGÃO", ""),
                 "Finalidade": nc.get("FINALIDADE", "")[:38],
                 "Valor": nc.get("RECEBIDO", ""), "Prazo": nc.get("PRAZO", ""),
+                "Etapa": status_map.get(nc.get("NC", ""), "") or "—",
             } for nc in em_tela])
             st.dataframe(df_et, use_container_width=True, hide_index=True, height=240)
+            st.caption("Defina a etapa de cada NC na página **Notas de Crédito**.")
         else:
             st.success("✅ Nenhuma NC EM TELA no momento.")
 
@@ -734,7 +760,7 @@ def page_dashboard(ncs, reqs):
     col_link, _ = st.columns([1, 5])
     with col_link:
         st.markdown(
-            f'<a href="{LINK_SHEETS}" target="_blank">'
+            f'<a href="{LINK_SHEETS_NC}" target="_blank">'
             f'<button style="background:#1a2540;color:#94a3b8;border:1px solid #1a2540;'
             f'border-radius:6px;padding:4px 12px;font-size:.8rem;cursor:pointer;">'
             f'📊 Abrir Planilha</button></a>',
@@ -766,20 +792,6 @@ def page_ncs(ncs, reqs=None):
     hoje = date.today()
     reqs = reqs or []
 
-    # Calcula empenhado por NC a partir das requisições (fonte de verdade)
-    from collections import defaultdict
-    emp_por_nc: dict[str, float] = defaultdict(float)
-    for r in reqs:
-        nc_r  = r.get("NC", "")
-        val_r = parse(r.get("VALOR", 0))
-        sit_r = r.get("SITUAÇÃO", "")
-        if sit_r == "Empenhada" and nc_r:
-            emp_por_nc[nc_r] += val_r
-        elif sit_r == "Anulado" and nc_r:
-            emp_por_nc[nc_r] -= val_r
-    # Garante não negativo
-    emp_por_nc = {k: max(0.0, v) for k, v in emp_por_nc.items()}
-
     def _dias_prazo(nc):
         try:
             return (datetime.strptime(nc["PRAZO"], "%d/%m/%Y").date() - hoje).days
@@ -808,14 +820,15 @@ def page_ncs(ncs, reqs=None):
     t_receb  = sum(parse(nc.get("RECEBIDO", 0)) for nc in ncs)
     t_saldo  = sum(parse(nc.get("SALDO NC",  0)) for nc in ncs)
 
+    t = _t()
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("📋 Total NCs",   len(ncs))
-    k2.metric("💰 Recebido",    fmt(t_receb))
-    k3.metric("🏦 Saldo",       fmt(t_saldo))
-    k4.metric("📺 Em Tela",     len(em_tela))
-    k5.metric("⚠️ Urgentes",    f"{venc7} vencendo",
-              delta=f"{vencidas} vencidas" if vencidas else None,
-              delta_color="inverse")
+    with k1: _kpi_card("📋 Total NCs", str(len(ncs)), color="#4c8ef0")
+    with k2: _kpi_card("💰 Recebido",  fmt(t_receb),  color=t["bar_recv"])
+    with k3: _kpi_card("🏦 Saldo",     fmt(t_saldo),  color=t["accent"])
+    with k4: _kpi_card("📺 Em Tela",   str(len(em_tela)), color="#fbbf24")
+    with k5: _kpi_card("⚠️ Urgentes",  f"{venc7} vencendo",
+                        f"{vencidas} vencida(s)" if vencidas else "",
+                        color="#ef4444" if vencidas else "#fbbf24")
 
     st.divider()
 
@@ -852,26 +865,46 @@ def page_ncs(ncs, reqs=None):
         filtradas.append(nc)
 
     # ── Barra de ações ─────────────────────────────────────────────────
-    ac1, ac2, ac3 = st.columns([1, 1, 4])
-    if ac1.button("➕ Nova NC", type="primary", use_container_width=True):
-        st.session_state["form_nc"] = not st.session_state.get("form_nc", False)
-    ac2.markdown(
-        f'<a href="{LINK_SHEETS}" target="_blank">'
+    ac1, ac2 = st.columns([1, 4])
+    ac1.markdown(
+        f'<a href="{LINK_SHEETS_NC}" target="_blank">'
         f'<button style="background:transparent;color:#64748b;border:1px solid #334155;'
         f'border-radius:6px;padding:8px 12px;font-size:.85rem;cursor:pointer;width:100%;">'
-        f'📊 Planilha</button></a>', unsafe_allow_html=True)
+        f'📊 Planilha da Bda</button></a>', unsafe_allow_html=True)
     saldo_f = sum(parse(nc.get("SALDO NC", 0)) for nc in filtradas)
     receb_f = sum(parse(nc.get("RECEBIDO", 0)) for nc in filtradas)
-    ac3.info(f"**{len(filtradas)}** de {len(ncs)} NCs · Recebido: **{fmt(receb_f)}** · Saldo: **{fmt(saldo_f)}**")
-
-    if st.session_state.get("form_nc"):
-        _form_nc()
+    ac2.info(
+        f"**{len(filtradas)}** de {len(ncs)} NCs · Recebido: **{fmt(receb_f)}** · Saldo: **{fmt(saldo_f)}** · "
+        f"🔒 somente leitura — lançadas e mantidas pela SALC da 1ª Bda Inf Sl"
+    )
 
     if not filtradas:
         st.info("Nenhuma NC encontrada com os filtros aplicados.")
         return
 
-    # ── Tabela enriquecida ─────────────────────────────────────────────
+    # ── Situação das NCs EM TELA ─────────────────────────────────────────
+    from nc_status import ETAPAS_NC, definir_status_ncs
+    status_map = _status_ncs_cached()
+
+    if em_tela:
+        st.subheader("🎯 Situação das NCs EM TELA")
+        st.caption("Etapa registrada pelo GAC para cada NC — ajuda a ver onde agir para baixar o total parado.")
+        contagem: dict[str, dict] = {}
+        for nc in em_tela:
+            etapa = status_map.get(nc.get("NC", ""), "") or "Sem etapa definida"
+            d = contagem.setdefault(etapa, {"qtd": 0, "valor": 0.0})
+            d["qtd"] += 1
+            d["valor"] += parse(nc.get("EM TELA", 0)) or parse(nc.get("RECEBIDO", 0))
+        ordem = ["Sem etapa definida"] + ETAPAS_NC
+        cols = st.columns(len(contagem) or 1)
+        for i, etapa in enumerate(sorted(contagem, key=lambda e: ordem.index(e) if e in ordem else 99)):
+            d = contagem[etapa]
+            with cols[i % len(cols)]:
+                _kpi_card(etapa, str(d["qtd"]), fmt(d["valor"]),
+                          color="#ef4444" if etapa == "Sem etapa definida" else "#fbbf24")
+        st.divider()
+
+    # ── Tabela ────────────────────────────────────────────────────────────
     rows = []
     for nc in filtradas:
         d         = _dias_prazo(nc)
@@ -893,7 +926,7 @@ def page_ncs(ncs, reqs=None):
             "EMPENHADO":  fmt(empenhado),
             "SALDO":      fmt(saldo),
             "EMP %":      pct_emp,
-            "SITUAÇÃO":   nc.get("SITUAÇÃO", ""),
+            "ETAPA":      status_map.get(nc_num, ""),
         })
 
     df = pd.DataFrame(rows)
@@ -906,85 +939,48 @@ def page_ncs(ncs, reqs=None):
             "NC":         st.column_config.TextColumn("NC",         width=130, disabled=True),
             "ORGÃO":      st.column_config.TextColumn("Órgão",      width=110, disabled=True),
             "OP":         st.column_config.TextColumn("Operação",   width=80,  disabled=True),
-            "FINALIDADE": st.column_config.TextColumn("Finalidade", width=200),
-            "DATA NC":    st.column_config.TextColumn("Data NC",    width=90),
-            "PRAZO":      st.column_config.TextColumn("Prazo",      width=90),
+            "FINALIDADE": st.column_config.TextColumn("Finalidade", width=200, disabled=True),
+            "DATA NC":    st.column_config.TextColumn("Data NC",    width=90,  disabled=True),
+            "PRAZO":      st.column_config.TextColumn("Prazo",      width=90,  disabled=True),
             "RESTAM":     st.column_config.NumberColumn("Restam",   width=75,  disabled=True),
             "RECEBIDO":   st.column_config.TextColumn("Recebido",   width=130, disabled=True),
             "EMPENHADO":  st.column_config.TextColumn("Empenhado",  width=130, disabled=True),
             "SALDO":      st.column_config.TextColumn("Saldo",      width=130, disabled=True),
             "EMP %":      st.column_config.ProgressColumn("Emp %",
                               format="%.1f%%", min_value=0, max_value=100, width=90),
-            "SITUAÇÃO":   st.column_config.TextColumn("Situação",   width=120, disabled=True),
+            "ETAPA":      st.column_config.SelectboxColumn("Etapa (GAC)", width=200,
+                              options=[""] + ETAPAS_NC),
         },
         key="nc_editor",
     )
 
-    # Detecta alterações em FINALIDADE, DATA NC ou PRAZO
-    nc_changes = []
-    for i, (orig, novo) in enumerate(zip(rows, edited_nc.to_dict("records"))):
-        if (orig["FINALIDADE"] != novo["FINALIDADE"] or
-            orig["DATA NC"]    != novo["DATA NC"] or
-            orig["PRAZO"]      != novo["PRAZO"]):
-            nc_changes.append({
-                "nc":        orig["NC"],
-                "finalidade": novo["FINALIDADE"],
-                "data_nc":   novo["DATA NC"],
-                "prazo":     novo["PRAZO"],
-            })
-
-    if nc_changes:
-        st.info(f"✏️ {len(nc_changes)} NC(s) alterada(s).")
-        if st.button("💾 Salvar alterações NCs", type="primary", key="btn_salvar_ncs"):
+    etapa_changes = {
+        orig["NC"]: novo["ETAPA"]
+        for orig, novo in zip(rows, edited_nc.to_dict("records"))
+        if orig["ETAPA"] != novo["ETAPA"]
+    }
+    if etapa_changes:
+        st.info(f"✏️ {len(etapa_changes)} NC(s) com etapa alterada.")
+        if st.button("💾 Salvar situações", type="primary", key="btn_salvar_etapas"):
             try:
-                from sheets_nc import atualizar_nc_campos
-                for c in nc_changes:
-                    atualizar_nc_campos(c["nc"], c["finalidade"], c["data_nc"], c["prazo"])
-                carregar(forcar=True)
-                st.success("✅ Alterações salvas!")
+                definir_status_ncs(etapa_changes)
+                _status_ncs_cached.clear()
+                st.success("✅ Situação salva!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Erro: {e}")
 
-
-def _form_nc():
-    st.divider()
-    st.subheader("➕ Nova Nota de Crédito")
-    with st.form("f_nc", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        nc_num  = c1.text_input("Número NC *",   placeholder="2026NC000000")
-        orgao   = c1.selectbox("Órgão *",        ORGAOS)
-        data_nc = c1.date_input("Data NC *",      value=date.today())
-        pi      = c1.text_input("PI")
-        nd      = c1.text_input("ND",            placeholder="339030")
-        ptres   = c2.text_input("PTRES",         placeholder="251050")
-        om      = c2.text_input("OM",            value=OM_PADRAO)
-        prazo   = c2.date_input("Prazo *")
-        op      = c2.text_input("Operação (OP)")
-        situ    = c2.selectbox("Status",         ["OK", "EM TELA"])
-        finalidade = st.text_area("Finalidade *")
-        valor = st.number_input("Valor (R$) *", min_value=0.0, step=0.01, format="%.2f")
-        s1, s2 = st.columns(2)
-        salvar   = s1.form_submit_button("💾 Salvar", type="primary", use_container_width=True)
-        cancelar = s2.form_submit_button("✖ Cancelar", use_container_width=True)
-        if cancelar:
-            st.session_state["form_nc"] = False; st.rerun()
-        if salvar:
-            if not nc_num or not finalidade or valor <= 0:
-                st.error("Preencha NC, Finalidade e Valor.")
-            else:
-                try:
-                    from sheets_nc import adicionar_nc
-                    adicionar_nc({"NC": nc_num, "ORGÃO": orgao,
-                                  "DATA NC": data_nc.strftime("%d/%m/%Y"),
-                                  "PI": pi, "ND": nd, "PTRES": ptres, "OM": om,
-                                  "PRAZO": prazo.strftime("%d/%m/%Y"), "OP": op,
-                                  "SITU": situ, "FINALIDADE": finalidade, "RECEBIDO": valor})
-                    st.success(f"✅ NC {nc_num} adicionada!")
-                    st.session_state["form_nc"] = False
-                    carregar(forcar=True); st.rerun()
-                except Exception as e:
-                    st.error(f"Erro: {e}")
+    # ── Atalho: gerar REQ a partir de uma NC EM TELA ─────────────────────
+    if em_tela:
+        st.divider()
+        st.subheader("⚡ Agir sobre uma NC EM TELA")
+        opts = [f"{nc.get('NC','')} · {nc.get('ORGÃO','')} · {nc.get('FINALIDADE','')[:50]}" for nc in em_tela]
+        sel = st.selectbox("Escolha a NC", opts, key="nc_shortcut_sel")
+        if st.button("⚡ Gerar REQ a partir desta NC", type="primary", key="btn_nc_shortcut"):
+            nc_escolhida = em_tela[opts.index(sel)]
+            st.session_state["gerar_nc_sel"] = nc_escolhida.get("NC", "")
+            st.session_state["page"] = "gerar_req"
+            st.rerun()
 
 
 # ── Cache para ler_reqs (evita 429 Quota exceeded) ────────────────────────────
@@ -994,14 +990,24 @@ def _ler_reqs_cached():
     return ler_reqs()
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _status_ncs_cached():
+    from nc_status import ler_status_ncs
+    return ler_status_ncs()
+
+
 # ── Requisições ───────────────────────────────────────────────────────────────
 def page_reqs(reqs_legado, ncs):
     """Página de Requisições — usa SSAC_REQS (nova aba limpa)."""
     import streamlit.components.v1 as components
     from reqs_crud import atualizar_req, itens_da_req
-    from sheets_nc import atualizar_nc_empenhado, recalcular_empenhados
 
-    reqs = _ler_reqs_cached()
+    try:
+        reqs = _ler_reqs_cached()
+    except Exception as e:
+        st.title("📝 Requisições")
+        st.error(f"Erro ao carregar requisições: {e}")
+        return
 
     st.title("📝 Requisições")
 
@@ -1018,12 +1024,13 @@ def page_reqs(reqs_legado, ncs):
     n_anul       = sum(1 for r in reqs if r.get("SITUACAO") == "Anulado")
     val_emp      = sum(_val(r) for r in reqs if r.get("SITUACAO") == "Empenhada")
 
+    t = _t()
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("📋 Total REQs",  len(reqs))
-    k2.metric("💰 Valor Total", fmt(total_geral))
-    k3.metric("⏳ Pendentes",   n_pend)
-    k4.metric("🟢 Empenhadas",  n_emp, delta=fmt(val_emp), delta_color="off")
-    k5.metric("🔴 Anuladas",    n_anul)
+    with k1: _kpi_card("📋 Total REQs",  str(len(reqs)), color="#4c8ef0")
+    with k2: _kpi_card("💰 Valor Total", fmt(total_geral), color=t["accent"])
+    with k3: _kpi_card("⏳ Pendentes",   str(n_pend), color="#fbbf24")
+    with k4: _kpi_card("🟢 Empenhadas",  str(n_emp), fmt(val_emp), color=t["bar_emp"])
+    with k5: _kpi_card("🔴 Anuladas",    str(n_anul), color="#ef4444")
 
     st.divider()
 
@@ -1055,20 +1062,11 @@ def page_reqs(reqs_legado, ncs):
         filtradas.append(r)
 
     # ── Ações ──────────────────────────────────────────────────────────
-    ac1, ac2, ac3 = st.columns([1, 1, 4])
+    ac1, ac2 = st.columns([1, 4])
     if ac1.button("➕ Nova REQ", type="primary", use_container_width=True):
         st.session_state["form_req"] = not st.session_state.get("form_req", False)
-    if ac2.button("🔄 Recalcular NCs", use_container_width=True):
-        with st.spinner("Recalculando..."):
-            try:
-                resultado = recalcular_empenhados(reqs)
-                carregar(forcar=True)
-                msgs = [f"**{k}**: {v}" for k, v in resultado.items()]
-                st.success("✅ " + " | ".join(msgs) if msgs else "Sem REQs empenhadas.")
-            except Exception as e:
-                st.error(f"Erro: {e}")
     total_f = sum(_val(r) for r in filtradas)
-    ac3.info(f"**{len(filtradas)}** de {len(reqs)} REQs · **{fmt(total_f)}**")
+    ac2.info(f"**{len(filtradas)}** de {len(reqs)} REQs · **{fmt(total_f)}**")
 
     if st.session_state.get("form_req"):
         _form_req_novo(ncs)
@@ -1150,20 +1148,11 @@ def page_reqs(reqs_legado, ncs):
             ba, bb = st.columns(2)
             if ba.button("💾 Salvar alterações", type="primary",
                          use_container_width=True, key="det_salvar"):
-                sit_ant = r_d.get("SITUACAO", "")
                 try:
                     _editar(detail_req, {**r_d,
                         "EMPRESA": emp, "CNPJ": cnpj, "PREGAO": pregao,
                         "NE": ne, "ENTRADA_SALC": entrada,
                         "OBS": obs, "SITUACAO": sit, "VALOR": val_e})
-                    nc, val = r_d.get("NC", ""), _val(r_d)
-                    if nc and val:
-                        if sit == "Empenhada" and sit_ant != "Empenhada":
-                            try: atualizar_nc_empenhado(nc, val)
-                            except Exception as e: st.warning(f"NC não atualizada: {e}")
-                        elif sit == "Anulado" and sit_ant != "Anulado":
-                            try: atualizar_nc_empenhado(nc, -val)
-                            except Exception as e: st.warning(f"NC não atualizada: {e}")
                     _ler_reqs_cached.clear()
                     st.session_state.pop("req_table", None)
                     st.success("✅ REQ atualizada!")
@@ -1187,6 +1176,10 @@ def page_reqs(reqs_legado, ncs):
             if cc2.button("✖ Cancelar", use_container_width=True, key="det_del_cancel"):
                 st.session_state.pop("confirm_del", None)
                 st.rerun()
+
+        if r_d.get("SITUACAO") == "Empenhada":
+            st.divider()
+            _fase2_secao(detail_req, r_d)
 
     # ── Consulta de saldo por NC ──────────────────────────────────────
     st.divider()
@@ -1246,6 +1239,201 @@ def page_reqs(reqs_legado, ncs):
                                file_name=f"REQ_{req_vis}.html", mime="text/html",
                                use_container_width=True)
             components.html(st.session_state["_vis_html"], height=860, scrolling=True)
+
+
+def _despachos_dict(r_d: dict) -> dict:
+    import json as _json
+    raw = r_d.get("DESPACHOS_JSON", "")
+    if not raw:
+        return {}
+    try:
+        return _json.loads(raw)
+    except Exception:
+        return {}
+
+
+def _fase2_secao(req_num: str, r_d: dict):
+    """Fase 2 — Prosseguimento da contratação pelo requisitante, após a REQ
+    ser empenhada: envio da NE, recebimento/ateste da NF, espelho SISCOFIS
+    (se material) e minutas de despacho (Cmt / Fisc Adm / OD).
+    Espelha os passos 10.4 a 10.10 do fluxograma SPED 3.0."""
+    import json as _json
+    import streamlit.components.v1 as components
+    from reqs_crud import atualizar_fase2
+    from sheets_nc import salvar_arquivo_no_drive
+    from despachos_html import (
+        gerar_html_despacho, gerar_html_ateste,
+        texto_padrao_despacho, texto_padrao_ateste, TIPOS_DESPACHO,
+    )
+
+    tipo_nf_atual = r_d.get("TIPO_NF", "Material")
+    despachos = _despachos_dict(r_d)
+
+    # ── Barra de progresso das etapas ──────────────────────────────────
+    etapas = [
+        ("NE enviada",    bool(r_d.get("DATA_ENVIO_NE"))),
+        ("NF recebida",   bool(r_d.get("NUM_NF"))),
+        ("Atestada",      bool(r_d.get("DATA_ATESTE"))),
+        ("Espelho SISCOFIS", bool(r_d.get("ANEXO_ESPELHO")) or tipo_nf_atual != "Material"),
+        ("Minutas prontas", bool(despachos)),
+    ]
+    concluidas = sum(1 for _, ok in etapas if ok)
+    st.subheader("📦 Fase 2 — Prosseguimento (Requisitante)")
+    st.progress(concluidas / len(etapas),
+                text=" · ".join(f"{'✅' if ok else '⬜'} {nome}" for nome, ok in etapas))
+
+    campos_doc = {
+        "REQ": req_num, "OM": OM_PADRAO, "UG": UG_PADRAO,
+        "DATA": datetime.today().strftime("%d/%m/%Y"),
+        "NC": r_d.get("NC", ""), "NE": r_d.get("NE", ""),
+        "EMPRESA": r_d.get("EMPRESA", ""), "VALOR": fmt(parse(r_d.get("VALOR", 0))),
+    }
+
+    with st.expander("1️⃣ Envio da Nota de Empenho ao fornecedor", expanded=not etapas[0][1]):
+        c1, c2 = st.columns(2)
+        data_envio = c1.date_input(
+            "Data de envio", key=f"f2_data_envio_{req_num}",
+            value=datetime.strptime(r_d["DATA_ENVIO_NE"], "%d/%m/%Y").date()
+            if r_d.get("DATA_ENVIO_NE") else None,
+        )
+        comp = c2.file_uploader("Comprovante (e-mail/print)", key=f"f2_comp_{req_num}",
+                                 type=["pdf", "png", "jpg", "jpeg", "eml", "msg"])
+        if st.button("💾 Salvar envio", key=f"f2_btn_envio_{req_num}"):
+            try:
+                upd = {}
+                if data_envio:
+                    upd["DATA_ENVIO_NE"] = data_envio.strftime("%d/%m/%Y")
+                if comp is not None:
+                    link = salvar_arquivo_no_drive(comp.getvalue(), f"REQ_{req_num}_comprovante_{comp.name}",
+                                                    comp.type or "application/octet-stream")
+                    upd["ANEXO_COMPROVANTE"] = link
+                if upd:
+                    atualizar_fase2(req_num, upd)
+                    _ler_reqs_cached.clear()
+                    st.success("✅ Envio registrado.")
+                    st.rerun()
+                else:
+                    st.warning("Informe ao menos a data ou o comprovante.")
+            except Exception as e:
+                st.error(f"Erro: {e}")
+        if r_d.get("ANEXO_COMPROVANTE"):
+            st.markdown(f"📎 [Comprovante anexado]({r_d['ANEXO_COMPROVANTE']})")
+
+    with st.expander("2️⃣ Recebimento da Nota Fiscal", expanded=etapas[0][1] and not etapas[1][1]):
+        c1, c2, c3 = st.columns(3)
+        tipo_nf = c1.selectbox("Tipo", ["Material", "Serviço"], key=f"f2_tiponf_{req_num}",
+                                index=0 if tipo_nf_atual != "Serviço" else 1)
+        num_nf = c2.text_input("Nº da NF", value=r_d.get("NUM_NF", ""), key=f"f2_numnf_{req_num}")
+        data_nf = c3.date_input(
+            "Data da NF", key=f"f2_datanf_{req_num}",
+            value=datetime.strptime(r_d["DATA_NF"], "%d/%m/%Y").date()
+            if r_d.get("DATA_NF") else None,
+        )
+        arq_nf = st.file_uploader("Nota Fiscal (PDF)", key=f"f2_arqnf_{req_num}", type=["pdf", "png", "jpg", "jpeg"])
+        if st.button("💾 Salvar NF", key=f"f2_btn_nf_{req_num}"):
+            try:
+                upd = {"TIPO_NF": tipo_nf}
+                if num_nf: upd["NUM_NF"] = num_nf
+                if data_nf: upd["DATA_NF"] = data_nf.strftime("%d/%m/%Y")
+                if arq_nf is not None:
+                    link = salvar_arquivo_no_drive(arq_nf.getvalue(), f"REQ_{req_num}_NF_{arq_nf.name}",
+                                                    arq_nf.type or "application/octet-stream")
+                    upd["ANEXO_NF"] = link
+                atualizar_fase2(req_num, upd)
+                _ler_reqs_cached.clear()
+                st.success("✅ NF registrada.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro: {e}")
+        if r_d.get("ANEXO_NF"):
+            st.markdown(f"📎 [Nota Fiscal anexada]({r_d['ANEXO_NF']})")
+
+    with st.expander("3️⃣ Ateste da Nota Fiscal", expanded=etapas[1][1] and not etapas[2][1]):
+        data_at = st.date_input(
+            "Data do ateste", key=f"f2_dataateste_{req_num}",
+            value=datetime.strptime(r_d["DATA_ATESTE"], "%d/%m/%Y").date()
+            if r_d.get("DATA_ATESTE") else None,
+        )
+        campos_ateste = {**campos_doc, "NUM_NF": r_d.get("NUM_NF", ""),
+                          "DATA_NF": r_d.get("DATA_NF", ""), "TIPO_NF": tipo_nf_atual}
+        texto_ateste_default = despachos.get("ATESTE") or texto_padrao_ateste(campos_ateste)
+        texto_ateste = st.text_area(
+            "Texto do ateste", value=texto_ateste_default, height=110,
+            key=f"f2_txtateste_{req_num}",
+        )
+        ca, cb = st.columns(2)
+        if ca.button("💾 Salvar texto + data", key=f"f2_btn_ateste_{req_num}"):
+            try:
+                upd = {"DESPACHOS_JSON": _json.dumps({**despachos, "ATESTE": texto_ateste}, ensure_ascii=False)}
+                if data_at:
+                    upd["DATA_ATESTE"] = data_at.strftime("%d/%m/%Y")
+                atualizar_fase2(req_num, upd)
+                _ler_reqs_cached.clear()
+                st.success("✅ Ateste salvo.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro: {e}")
+        if cb.button("📄 Gerar documento", key=f"f2_btn_gerar_ateste_{req_num}"):
+            html_at = gerar_html_ateste({**campos_ateste, "TEXTO": texto_ateste})
+            st.session_state[f"_f2_ateste_html_{req_num}"] = html_at
+        if st.session_state.get(f"_f2_ateste_html_{req_num}"):
+            html_at = st.session_state[f"_f2_ateste_html_{req_num}"]
+            st.download_button("⬇️ Baixar HTML", data=html_at.encode("utf-8"),
+                                file_name=f"REQ_{req_num}_ateste.html", mime="text/html",
+                                key=f"f2_dl_ateste_{req_num}")
+            components.html(html_at, height=420, scrolling=True)
+
+    if tipo_nf_atual == "Material":
+        with st.expander("4️⃣ Espelho SISCOFIS", expanded=etapas[2][1] and not etapas[3][1]):
+            esp = st.file_uploader("Espelho do SISCOFIS", key=f"f2_espelho_{req_num}",
+                                    type=["pdf", "png", "jpg", "jpeg"])
+            if st.button("💾 Salvar espelho", key=f"f2_btn_espelho_{req_num}"):
+                if esp is not None:
+                    try:
+                        link = salvar_arquivo_no_drive(esp.getvalue(), f"REQ_{req_num}_espelho_{esp.name}",
+                                                        esp.type or "application/octet-stream")
+                        atualizar_fase2(req_num, {"ANEXO_ESPELHO": link})
+                        _ler_reqs_cached.clear()
+                        st.success("✅ Espelho anexado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro: {e}")
+                else:
+                    st.warning("Selecione o arquivo do espelho.")
+            if r_d.get("ANEXO_ESPELHO"):
+                st.markdown(f"📎 [Espelho anexado]({r_d['ANEXO_ESPELHO']})")
+
+    with st.expander("5️⃣ Minutas de despacho (Cmt / Fiscal Adm / OD)", expanded=etapas[3][1] and not etapas[4][1]):
+        tipo_desp = st.selectbox("Despacho", list(TIPOS_DESPACHO.keys()),
+                                  format_func=lambda k: TIPOS_DESPACHO[k],
+                                  key=f"f2_tipodesp_{req_num}")
+        texto_default = despachos.get(tipo_desp) or texto_padrao_despacho(tipo_desp, {**campos_doc, "REQ": req_num})
+        texto_desp = st.text_area("Texto da minuta", value=texto_default, height=110,
+                                   key=f"f2_txtdesp_{req_num}_{tipo_desp}")
+        da, db = st.columns(2)
+        if da.button("💾 Salvar minuta", key=f"f2_btn_savedesp_{req_num}"):
+            try:
+                novo = {**despachos, tipo_desp: texto_desp}
+                atualizar_fase2(req_num, {"DESPACHOS_JSON": _json.dumps(novo, ensure_ascii=False)})
+                _ler_reqs_cached.clear()
+                st.success("✅ Minuta salva.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro: {e}")
+        if db.button("📄 Gerar documento", key=f"f2_btn_gendesp_{req_num}"):
+            html_d = gerar_html_despacho(tipo_desp, {**campos_doc, "TEXTO": texto_desp})
+            st.session_state[f"_f2_desp_html_{req_num}"] = html_d
+        if st.session_state.get(f"_f2_desp_html_{req_num}"):
+            html_d = st.session_state[f"_f2_desp_html_{req_num}"]
+            st.download_button("⬇️ Baixar HTML", data=html_d.encode("utf-8"),
+                                file_name=f"REQ_{req_num}_{tipo_desp.lower()}.html", mime="text/html",
+                                key=f"f2_dl_desp_{req_num}")
+            components.html(html_d, height=380, scrolling=True)
+
+        if despachos:
+            prontos = [TIPOS_DESPACHO[k] for k in despachos if k in TIPOS_DESPACHO]
+            if prontos:
+                st.caption(f"Minutas já salvas: {', '.join(prontos)}")
 
 
 def _form_editar_req(ncs, reqs):
@@ -1394,56 +1582,22 @@ def _form_req_novo(ncs):
 
 # ── Lançar por PDF / HTML ─────────────────────────────────────────────────────
 def page_pdf(ncs):
-    st.title("📄 Lançar por PDF ou HTML")
+    st.title("📄 Lançar Requisição por PDF ou HTML")
+    st.caption("🔒 NCs são somente leitura (vêm da planilha da Bda) — este lançamento é só para Requisições.")
     if not ANTHROPIC_API_KEY:
         st.error("⚠️ Configure ANTHROPIC_API_KEY para usar este recurso.")
         return
-    tipo = st.radio("Tipo", ["Nota de Crédito (NC)", "Requisição (REQ)"], horizontal=True)
     uploaded = st.file_uploader("Selecione o arquivo", type=["pdf", "html", "htm"])
     if uploaded:
         with st.spinner("🤖 Analisando documento..."):
             try:
-                from extrator_pdf import extrair_nc, extrair_req
+                from extrator_pdf import extrair_req
                 b = uploaded.read()
-                if "NC" in tipo:
-                    dados = extrair_nc(b, uploaded.name)
-                    st.success("✅ Dados extraídos — revise e confirme.")
-                    _confirmar_nc(dados)
-                else:
-                    dados = extrair_req(b, uploaded.name)
-                    st.success("✅ Dados extraídos — revise e confirme.")
-                    _confirmar_req(dados, ncs)
+                dados = extrair_req(b, uploaded.name)
+                st.success("✅ Dados extraídos — revise e confirme.")
+                _confirmar_req(dados, ncs)
             except Exception as e:
                 st.error(f"Erro na extração: {e}")
-
-
-def _confirmar_nc(dados):
-    st.divider(); st.subheader("✅ Confirmar NC")
-    with st.form("f_pdf_nc"):
-        c1, c2 = st.columns(2)
-        nc      = c1.text_input("Número NC",            value=dados.get("NC", ""))
-        orgao   = c1.text_input("Órgão",                value=dados.get("ORGÃO", ""))
-        data_nc = c1.text_input("Data NC (DD/MM/YYYY)", value=dados.get("DATA NC", ""))
-        pi      = c1.text_input("PI",                   value=dados.get("PI", ""))
-        nd      = c1.text_input("ND",                   value=dados.get("ND", ""))
-        ptres   = c2.text_input("PTRES",                value=dados.get("PTRES", ""))
-        om      = c2.text_input("OM",                   value=dados.get("OM", OM_PADRAO))
-        prazo   = c2.text_input("Prazo (DD/MM/YYYY)",   value=dados.get("PRAZO", ""))
-        op      = c2.text_input("Operação",             value=dados.get("OP", ""))
-        situ    = c2.selectbox("Status", ["OK", "EM TELA"], index=1 if dados.get("SITU") == "EM TELA" else 0)
-        finalidade = st.text_area("Finalidade", value=dados.get("FINALIDADE", ""))
-        valor = st.number_input("Valor (R$)", value=float(dados.get("RECEBIDO", 0) or 0),
-                                min_value=0.0, step=0.01, format="%.2f")
-        if st.form_submit_button("💾 Confirmar e Salvar", type="primary", use_container_width=True):
-            try:
-                from sheets_nc import adicionar_nc
-                adicionar_nc({"NC": nc, "ORGÃO": orgao, "DATA NC": data_nc, "PI": pi, "ND": nd,
-                              "PTRES": ptres, "OM": om, "PRAZO": prazo, "OP": op, "SITU": situ,
-                              "FINALIDADE": finalidade, "RECEBIDO": valor})
-                st.success(f"✅ NC {nc} lançada!")
-                carregar(forcar=True)
-            except Exception as e:
-                st.error(f"Erro: {e}")
 
 
 def _confirmar_req(dados, ncs):
@@ -1486,9 +1640,13 @@ def page_importar(ncs, reqs):
     k3.metric("NCs OK",          sum(1 for nc in ncs if nc.get("SITU") == "OK"))
     k4.metric("REQs Pendentes",  sum(1 for r  in reqs if r.get("SITUAÇÃO") == "Pendente"))
 
-    st.info(f"🔗 Planilha: `{SHEET_ID_NC[:30]}...`  ·  Sync automático a cada 2 min.")
-    st.markdown(f'<a href="{LINK_SHEETS}" target="_blank">📊 Abrir planilha no Google Sheets ↗</a>',
-                unsafe_allow_html=True)
+    st.info(
+        f"🔗 Requisições: `{SHEET_ID_NC[:30]}...`  ·  NCs (somente leitura): planilha da Bda  ·  "
+        f"Sync automático a cada 2 min."
+    )
+    lc1, lc2 = st.columns(2)
+    lc1.markdown(f'<a href="{LINK_SHEETS}" target="_blank">📊 Planilha do SSAC (REQs) ↗</a>', unsafe_allow_html=True)
+    lc2.markdown(f'<a href="{LINK_SHEETS_NC}" target="_blank">📊 Planilha de NCs (Bda) ↗</a>', unsafe_allow_html=True)
 
     if st.button("🔄 Forçar Sincronização", type="primary"):
         with st.spinner("Sincronizando..."):
@@ -1496,8 +1654,8 @@ def page_importar(ncs, reqs):
         st.success("✅ Dados atualizados!"); st.rerun()
 
     st.divider()
-    st.subheader("📂 Importar de Arquivo (Excel / CSV)")
-    tipo_imp = st.radio("O que importar?", ["Notas de Crédito (NCs)", "Requisições (REQs)"], horizontal=True)
+    st.subheader("📂 Importar Requisições de Arquivo (Excel / CSV)")
+    st.caption("🔒 NCs são somente leitura e não podem ser importadas por aqui.")
     arq = st.file_uploader("Selecione o arquivo", type=["xlsx", "xls", "csv"])
 
     if arq:
@@ -1508,15 +1666,12 @@ def page_importar(ncs, reqs):
             st.dataframe(df_imp.head(10), use_container_width=True, hide_index=True)
 
             if st.button(f"⬆️ Importar {len(df_imp)} linha(s)", type="primary"):
-                from sheets_nc import adicionar_nc, adicionar_req
+                from sheets_nc import adicionar_req
                 erros = 0
                 bar = st.progress(0)
                 for i, (_, row) in enumerate(df_imp.iterrows()):
                     try:
-                        if "NCs" in tipo_imp:
-                            adicionar_nc(row.to_dict())
-                        else:
-                            adicionar_req(row.to_dict())
+                        adicionar_req(row.to_dict())
                     except Exception:
                         erros += 1
                     bar.progress((i + 1) / len(df_imp))

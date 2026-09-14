@@ -2,6 +2,7 @@
 CRUD limpo para a aba SSAC_REQS — sem fórmulas, sem conflito.
 Colunas: REQ | DATA | NC | NE | PI | ND | EMPRESA | CNPJ | PREGAO
          TIPO | VALOR | SITUACAO | ENTRADA_SALC | OBS | ITENS_JSON
+         + colunas da Fase 2 (pós-empenho, ver FASE2_COLUNAS)
 """
 import json
 import logging
@@ -12,23 +13,58 @@ from config import SHEET_ID_NC, ABA_SSAC_REQS
 
 logger = logging.getLogger(__name__)
 
-COLUNAS = [
+COLUNAS_BASE = [
     "REQ", "DATA", "NC", "NE", "PI", "ND",
     "EMPRESA", "CNPJ", "PREGAO", "TIPO",
     "VALOR", "SITUACAO", "ENTRADA_SALC", "OBS", "ITENS_JSON",
 ]
+
+# Fase 2 — prosseguimento da contratação pelo requisitante (após empenho),
+# conforme fluxograma SPED: envio da NE, recebimento da NF, ateste,
+# espelho SISCOFIS (material) e minutas de despacho (Cmt/Fisc Adm/OD).
+FASE2_COLUNAS = [
+    "DATA_ENVIO_NE", "ANEXO_COMPROVANTE",
+    "TIPO_NF", "NUM_NF", "DATA_NF", "ANEXO_NF",
+    "DATA_ATESTE", "ANEXO_ESPELHO",
+    "DESPACHOS_JSON",
+]
+
+COLUNAS = COLUNAS_BASE + FASE2_COLUNAS
+
+
+def _garantir_colunas(ws) -> list[str]:
+    """Garante que o cabeçalho da aba tem todas as COLUNAS (adiciona as que faltarem
+    ao final, sem tocar nas existentes). Retorna o cabeçalho atualizado."""
+    headers = ws.row_values(1)
+    faltantes = [c for c in COLUNAS if c not in headers]
+    if faltantes:
+        if ws.col_count < len(headers) + len(faltantes):
+            ws.add_cols(len(headers) + len(faltantes) - ws.col_count)
+        from gspread.utils import rowcol_to_a1
+        inicio = len(headers) + 1
+        fim = len(headers) + len(faltantes)
+        ws.update(
+            range_name=f"{rowcol_to_a1(1, inicio)}:{rowcol_to_a1(1, fim)}",
+            values=[faltantes],
+            value_input_option="RAW",
+        )
+        headers = headers + faltantes
+        logger.info("Colunas adicionadas à aba %s: %s", ABA_SSAC_REQS, faltantes)
+    return headers
 
 
 def _ws():
     client   = _conectar()
     planilha = client.open_by_key(SHEET_ID_NC)
     try:
-        return planilha.worksheet(ABA_SSAC_REQS)
+        ws = planilha.worksheet(ABA_SSAC_REQS)
     except Exception:
         ws = planilha.add_worksheet(title=ABA_SSAC_REQS, rows=1000, cols=len(COLUNAS))
         ws.update("A1", [COLUNAS], value_input_option="RAW")
         logger.info("Aba %s criada.", ABA_SSAC_REQS)
         return ws
+    _garantir_colunas(ws)
+    return ws
 
 
 def ler_reqs() -> list[dict]:
@@ -75,7 +111,7 @@ def adicionar_req(dados: dict) -> None:
         "OBS":          dados.get("OBS", ""),
         "ITENS_JSON":   itens_json,
     }
-    row = [linha[c] for c in COLUNAS]
+    row = [linha.get(c, "") for c in COLUNAS]
 
     from gspread.utils import rowcol_to_a1
     end_col = rowcol_to_a1(1, len(COLUNAS)).replace("1", "")
@@ -134,7 +170,9 @@ def excluir_req(req_num: str) -> None:
 
 
 def editar_req(req_num: str, dados: dict) -> None:
-    """Atualiza todos os campos de uma REQ existente."""
+    """Atualiza os campos básicos de uma REQ existente.
+    Preserva os campos da Fase 2 (FASE2_COLUNAS) já gravados, a menos que
+    `dados` os informe explicitamente."""
     ws    = _ws()
     todos = ws.get_all_values()
     if not todos:
@@ -152,6 +190,9 @@ def editar_req(req_num: str, dados: dict) -> None:
     for i, row in enumerate(todos[1:], start=2):
         val = row[col_req - 1] if len(row) >= col_req else ""
         if str(val).strip() == str(req_num).strip():
+            row_atual = row + [""] * (len(headers) - len(row))
+            atual     = dict(zip(headers, row_atual))
+
             valor = dados.get("VALOR", 0.0)
             valor_fmt = format_moeda(float(valor)) if isinstance(valor, (int, float)) else str(valor)
             import json as _json
@@ -173,12 +214,49 @@ def editar_req(req_num: str, dados: dict) -> None:
                 "OBS":          dados.get("OBS", ""),
                 "ITENS_JSON":   _json.dumps(itens, ensure_ascii=False) if itens else "",
             }
+            for campo in FASE2_COLUNAS:
+                linha[campo] = dados[campo] if campo in dados else atual.get(campo, "")
+
             row_vals = [linha.get(c, "") for c in COLUNAS]
             end_col  = rowcol_to_a1(1, len(COLUNAS)).replace("1", "")
             ws.update(range_name=f"A{i}:{end_col}{i}", values=[row_vals],
                       value_input_option="RAW")
             logger.info("REQ %s editada.", req_num)
             return
+
+
+def atualizar_fase2(req_num: str, campos: dict) -> None:
+    """Atualiza somente os campos da Fase 2 (pós-empenho) de uma REQ, sem
+    tocar nos demais. `campos` deve conter apenas chaves de FASE2_COLUNAS."""
+    ws    = _ws()
+    todos = ws.get_all_values()
+    if not todos:
+        raise ValueError("Aba SSAC_REQS vazia.")
+    headers = todos[0]
+
+    def col(name):
+        return headers.index(name) + 1 if name in headers else None
+
+    col_req = col("REQ")
+    if not col_req:
+        raise ValueError("Coluna REQ não encontrada.")
+
+    from gspread.utils import rowcol_to_a1
+    for i, row in enumerate(todos[1:], start=2):
+        val = row[col_req - 1] if len(row) >= col_req else ""
+        if str(val).strip() == str(req_num).strip():
+            batch = []
+            for campo, valor in campos.items():
+                if campo not in FASE2_COLUNAS:
+                    continue
+                c = col(campo)
+                if c:
+                    batch.append({"range": rowcol_to_a1(i, c), "values": [[valor]]})
+            if batch:
+                ws.batch_update(batch, value_input_option="RAW")
+            logger.info("REQ %s: Fase 2 atualizada (%s)", req_num, list(campos.keys()))
+            return
+    raise ValueError(f"REQ '{req_num}' não encontrada.")
 
 
 def itens_da_req(req_num: str) -> list[dict]:
