@@ -47,3 +47,6 @@ RESP_PADRAO          = _s("RESP_PADRAO", "10º GAC Sl")
 # Se ABA_CONSOLIDADO ficar vazio, usa a primeira aba da planilha.
 SHEET_ID_CONSOLIDADO = _s("SHEET_ID_CONSOLIDADO", "1iR8aqsMNgW_SjtRGDYUETftil-8u0K3NQNi_BzdMc4U")
 ABA_CONSOLIDADO      = _s("ABA_CONSOLIDADO", "")
+
+# Código de Gestão usado na URL do Portal da Transparência (padrão SIAFI: 00001)
+GESTAO_PADRAO        = _s("GESTAO_PADRAO", "00001")

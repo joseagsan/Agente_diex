@@ -3,6 +3,7 @@ SSAC — Sistema de Suporte ao Controle de NCs e Requisições.
 Execute: streamlit run interface.py
 """
 import logging
+import re
 from datetime import date, datetime
 
 import pandas as pd
@@ -20,7 +21,10 @@ st.set_page_config(
 logging.basicConfig(level=logging.INFO)
 
 from auth import logout, requer_auth
-from config import ANTHROPIC_API_KEY, OM_PADRAO, UG_PADRAO, SHEET_ID_NC, SHEET_ID_NC_ORIGEM, RESP_PADRAO
+from config import (
+    ANTHROPIC_API_KEY, OM_PADRAO, UG_PADRAO, SHEET_ID_NC, SHEET_ID_NC_ORIGEM,
+    RESP_PADRAO, GESTAO_PADRAO,
+)
 from relatorios import (
     exportar_excel, kpis, ncs_por_operacao, ncs_vencendo,
     relatorio_extrato_nc, relatorio_por_empresa, relatorio_saldo_pi, relatorio_saldo_nd,
@@ -438,6 +442,18 @@ def _cor_prazo(prazo_str: str) -> str:
         return "🔴" if n < 0 else "🟠" if n <= 7 else "🟡" if n <= 30 else "🟢"
     except Exception:
         return "⚪"
+
+
+def url_portal_transparencia(ug: str, ne: str) -> str:
+    """Gera o link do empenho no Portal da Transparência a partir da UG e do
+    número da NE (ex: 2026NE000227) — mesmo padrão de URL usado pelo portal:
+    https://portaldatransparencia.gov.br/despesas/empenho/{UG}{GESTAO}{NE}"""
+    ug = re.sub(r"\D", "", str(ug or ""))
+    ne = re.sub(r"[^0-9A-Za-z]", "", str(ne or "")).upper()
+    if not ug or not ne:
+        return ""
+    return (f"https://portaldatransparencia.gov.br/despesas/empenho/"
+            f"{ug}{GESTAO_PADRAO}{ne}?ordenarPor=fase&direcao=asc")
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
@@ -982,53 +998,74 @@ def page_ncs(ncs, reqs=None):
             st.session_state["page"] = "gerar_req"
             st.rerun()
 
-    # ── Empenhos vinculados a uma NC (planilha Consolidado) ──────────────
+    # ── Empenhos (planilha Consolidado) ───────────────────────────────────
     st.divider()
-    st.subheader("💼 Empenhos de uma NC")
+    st.subheader("💼 Empenhos")
     st.caption("Dados da planilha Consolidado (NE, situação, liquidação/pagamento) — somente leitura.")
-    opts_nc = [nc.get("NC", "") for nc in filtradas if nc.get("NC")]
-    nc_ver = st.selectbox("Escolha a NC", opts_nc, key="nc_empenhos_sel")
 
-    if nc_ver:
-        try:
-            empenhos = _empenhos_cached()
-        except Exception as e:
-            empenhos = []
-            st.error(f"Erro ao carregar Consolidado: {e}")
+    try:
+        empenhos_todos = _empenhos_cached()
+    except Exception as e:
+        empenhos_todos = []
+        st.error(f"Erro ao carregar Consolidado: {e}")
 
-        vinculados = [e for e in empenhos if e.get("_NC_DETECTADA") == nc_ver]
+    fe1, fe2, fe3, fe4 = st.columns(4)
+    f_ue    = fe1.multiselect("UGE",      sorted({e.get("UG", "")        for e in empenhos_todos if e.get("UG")}), key="emp_f_ue")
+    f_orge  = fe2.multiselect("Órgão",    sorted({e.get("ORGAO", "")     for e in empenhos_todos if e.get("ORGAO")}), key="emp_f_org")
+    f_pie   = fe3.multiselect("PI",       sorted({e.get("PI", "")        for e in empenhos_todos if e.get("PI")}), key="emp_f_pi")
+    f_situe = fe4.multiselect("Situação", sorted({e.get("SITUAÇÃO", "")  for e in empenhos_todos if e.get("SITUAÇÃO")}), key="emp_f_situ")
 
-        if not vinculados:
-            st.info("Nenhum empenho encontrado para esta NC no Consolidado.")
-        else:
-            def _v_est(e, campo):
-                return parse(e.get(campo, 0))
+    empenhos_filtrados = empenhos_todos
+    if f_ue:    empenhos_filtrados = [e for e in empenhos_filtrados if e.get("UG") in f_ue]
+    if f_orge:  empenhos_filtrados = [e for e in empenhos_filtrados if e.get("ORGAO") in f_orge]
+    if f_pie:   empenhos_filtrados = [e for e in empenhos_filtrados if e.get("PI") in f_pie]
+    if f_situe: empenhos_filtrados = [e for e in empenhos_filtrados if e.get("SITUAÇÃO") in f_situe]
 
-            total_emp   = sum(_v_est(e, c) for e in vinculados
-                               for c in ["A LIQUIDAR", "EM LIQUIDAÇÃO", "LIQUIDADO", "PAGO", "ANULADO"])
-            total_pago  = sum(_v_est(e, "PAGO") for e in vinculados)
-            total_liq   = sum(_v_est(e, "LIQUIDADO") for e in vinculados)
-            total_anul  = sum(_v_est(e, "ANULADO") for e in vinculados)
+    opts_nc = ["(Todas)"] + sorted({e.get("_NC_DETECTADA", "") for e in empenhos_filtrados if e.get("_NC_DETECTADA")})
+    nc_ver  = st.selectbox("Escolha a NC", opts_nc, key="nc_empenhos_sel")
 
-            ce1, ce2, ce3, ce4 = st.columns(4)
-            with ce1: _kpi_card("📋 Empenhos (NE)", str(len(vinculados)), color="#4c8ef0")
-            with ce2: _kpi_card("💰 Valor Total",    fmt(total_emp),  color=t["accent"])
-            with ce3: _kpi_card("✅ Pago/Liquidado", fmt(total_pago + total_liq), color=t["bar_emp"])
-            with ce4: _kpi_card("🔴 Anulado",         fmt(total_anul), color="#ef4444")
+    vinculados = empenhos_filtrados if nc_ver == "(Todas)" else [
+        e for e in empenhos_filtrados if e.get("_NC_DETECTADA") == nc_ver
+    ]
 
-            df_emp = pd.DataFrame([{
-                "NE":         e.get("NE", ""),
-                "Fornecedor": e.get("NOME_FAV", "")[:35],
-                "Situação":   e.get("SITUAÇÃO", ""),
-                "A Liquidar": e.get("A LIQUIDAR", ""),
-                "Em Liquid.": e.get("EM LIQUIDAÇÃO", ""),
-                "Liquidado":  e.get("LIQUIDADO", ""),
-                "Pago":       e.get("PAGO", ""),
-                "Anulado":    e.get("ANULADO", ""),
-                "Env. Fornec.": e.get("DT. ENV. FORC.", ""),
-                "Dias":       e.get("DIAS_ENV", ""),
-            } for e in vinculados])
-            st.dataframe(df_emp, use_container_width=True, hide_index=True)
+    if not vinculados:
+        st.info("Nenhum empenho encontrado com os filtros/NC selecionados.")
+    else:
+        def _v_est(e, campo):
+            return parse(e.get(campo, 0))
+
+        total_emp   = sum(_v_est(e, c) for e in vinculados
+                           for c in ["A LIQUIDAR", "EM LIQUIDAÇÃO", "LIQUIDADO", "PAGO", "ANULADO"])
+        total_pago  = sum(_v_est(e, "PAGO") for e in vinculados)
+        total_liq   = sum(_v_est(e, "LIQUIDADO") for e in vinculados)
+        total_anul  = sum(_v_est(e, "ANULADO") for e in vinculados)
+
+        ce1, ce2, ce3, ce4 = st.columns(4)
+        with ce1: _kpi_card("📋 Empenhos (NE)", str(len(vinculados)), color="#4c8ef0")
+        with ce2: _kpi_card("💰 Valor Total",    fmt(total_emp),  color=t["accent"])
+        with ce3: _kpi_card("✅ Pago/Liquidado", fmt(total_pago + total_liq), color=t["bar_emp"])
+        with ce4: _kpi_card("🔴 Anulado",         fmt(total_anul), color="#ef4444")
+
+        df_emp = pd.DataFrame([{
+            "NC":         e.get("_NC_DETECTADA", ""),
+            "NE":         e.get("NE", ""),
+            "Fornecedor": e.get("NOME_FAV", "")[:35],
+            "Situação":   e.get("SITUAÇÃO", ""),
+            "A Liquidar": e.get("A LIQUIDAR", ""),
+            "Em Liquid.": e.get("EM LIQUIDAÇÃO", ""),
+            "Liquidado":  e.get("LIQUIDADO", ""),
+            "Pago":       e.get("PAGO", ""),
+            "Anulado":    e.get("ANULADO", ""),
+            "Env. Fornec.": e.get("DT. ENV. FORC.", ""),
+            "Dias":       e.get("DIAS_ENV", ""),
+            "Portal":     url_portal_transparencia(e.get("UG", ""), e.get("NE", "")),
+        } for e in vinculados])
+        st.dataframe(
+            df_emp, use_container_width=True, hide_index=True,
+            column_config={
+                "Portal": st.column_config.LinkColumn("Portal", display_text="🔗 Ver"),
+            },
+        )
 
 
 # ── Cache para ler_reqs (evita 429 Quota exceeded) ────────────────────────────
@@ -1210,6 +1247,12 @@ def page_reqs(reqs_legado, ncs):
         pregao = ec1.text_input("Pregão",        value=r_d.get("PREGAO", ""),       key=f"d_preg_{detail_req}")
 
         ne     = ec2.text_input("NE",            value=r_d.get("NE", ""),           key=f"d_ne_{detail_req}")
+        if ne:
+            _ug_ne = next((n.get("_ABA_ORIGEM", "") for n in ncs
+                           if str(n.get("NC", "")).strip() == str(r_d.get("NC", "")).strip()), "") or UG_PADRAO
+            _url_ne = url_portal_transparencia(_ug_ne, ne)
+            if _url_ne:
+                ec2.markdown(f"[🔗 Ver empenho no Portal da Transparência]({_url_ne})")
         entrada= ec2.text_input("Entrada SALC",  value=r_d.get("ENTRADA_SALC", ""),key=f"d_ent_{detail_req}")
         obs    = ec2.text_area("Obs",            value=r_d.get("OBS", ""),          key=f"d_obs_{detail_req}", height=100)
 
