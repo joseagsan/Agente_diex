@@ -982,12 +982,66 @@ def page_ncs(ncs, reqs=None):
             st.session_state["page"] = "gerar_req"
             st.rerun()
 
+    # ── Empenhos vinculados a uma NC (planilha Consolidado) ──────────────
+    st.divider()
+    st.subheader("💼 Empenhos de uma NC")
+    st.caption("Dados da planilha Consolidado (NE, situação, liquidação/pagamento) — somente leitura.")
+    opts_nc = [nc.get("NC", "") for nc in filtradas if nc.get("NC")]
+    nc_ver = st.selectbox("Escolha a NC", opts_nc, key="nc_empenhos_sel")
+
+    if nc_ver:
+        try:
+            empenhos = _empenhos_cached()
+        except Exception as e:
+            empenhos = []
+            st.error(f"Erro ao carregar Consolidado: {e}")
+
+        vinculados = [e for e in empenhos if e.get("_NC_DETECTADA") == nc_ver]
+
+        if not vinculados:
+            st.info("Nenhum empenho encontrado para esta NC no Consolidado.")
+        else:
+            def _v_est(e, campo):
+                return parse(e.get(campo, 0))
+
+            total_emp   = sum(_v_est(e, c) for e in vinculados
+                               for c in ["A LIQUIDAR", "EM LIQUIDAÇÃO", "LIQUIDADO", "PAGO", "ANULADO"])
+            total_pago  = sum(_v_est(e, "PAGO") for e in vinculados)
+            total_liq   = sum(_v_est(e, "LIQUIDADO") for e in vinculados)
+            total_anul  = sum(_v_est(e, "ANULADO") for e in vinculados)
+
+            ce1, ce2, ce3, ce4 = st.columns(4)
+            with ce1: _kpi_card("📋 Empenhos (NE)", str(len(vinculados)), color="#4c8ef0")
+            with ce2: _kpi_card("💰 Valor Total",    fmt(total_emp),  color=t["accent"])
+            with ce3: _kpi_card("✅ Pago/Liquidado", fmt(total_pago + total_liq), color=t["bar_emp"])
+            with ce4: _kpi_card("🔴 Anulado",         fmt(total_anul), color="#ef4444")
+
+            df_emp = pd.DataFrame([{
+                "NE":         e.get("NE", ""),
+                "Fornecedor": e.get("NOME_FAV", "")[:35],
+                "Situação":   e.get("SITUAÇÃO", ""),
+                "A Liquidar": e.get("A LIQUIDAR", ""),
+                "Em Liquid.": e.get("EM LIQUIDAÇÃO", ""),
+                "Liquidado":  e.get("LIQUIDADO", ""),
+                "Pago":       e.get("PAGO", ""),
+                "Anulado":    e.get("ANULADO", ""),
+                "Env. Fornec.": e.get("DT. ENV. FORC.", ""),
+                "Dias":       e.get("DIAS_ENV", ""),
+            } for e in vinculados])
+            st.dataframe(df_emp, use_container_width=True, hide_index=True)
+
 
 # ── Cache para ler_reqs (evita 429 Quota exceeded) ────────────────────────────
 @st.cache_data(ttl=60, show_spinner=False)
 def _ler_reqs_cached():
     from reqs_crud import ler_reqs
     return ler_reqs()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _empenhos_cached():
+    from sheets_nc import ler_empenhos
+    return ler_empenhos()
 
 
 @st.cache_data(ttl=60, show_spinner=False)

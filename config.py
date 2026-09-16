@@ -41,3 +41,9 @@ EMAIL_PASSWORD       = _s("EMAIL_PASSWORD", "")  # senha de app do Gmail
 SHEET_ID_NC_ORIGEM   = _s("SHEET_ID_NC_ORIGEM", "1PhxwM7BLauZQEYNyR7P-T2i2huwyGLaUAy3YVJpD-fs")
 ABAS_NC_ORIGEM       = [a.strip() for a in _s("ABAS_NC_ORIGEM", "160482,160487").split(",") if a.strip()]
 RESP_PADRAO          = _s("RESP_PADRAO", "10º GAC Sl")
+
+# Planilha "Consolidado" — controle de liquidação/pagamento por NE (empenho),
+# com situação, valores por estágio e datas de envio ao fornecedor.
+# Se ABA_CONSOLIDADO ficar vazio, usa a primeira aba da planilha.
+SHEET_ID_CONSOLIDADO = _s("SHEET_ID_CONSOLIDADO", "1iR8aqsMNgW_SjtRGDYUETftil-8u0K3NQNi_BzdMc4U")
+ABA_CONSOLIDADO      = _s("ABA_CONSOLIDADO", "")

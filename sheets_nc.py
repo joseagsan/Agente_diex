@@ -7,6 +7,7 @@ Bda, não pelo SSAC. Requisições, fornecedores e frases continuam na
 planilha própria do SSAC (SHEET_ID_NC).
 """
 import logging
+import re
 import unicodedata
 from datetime import datetime
 from typing import Optional
@@ -17,6 +18,7 @@ from google.oauth2.service_account import Credentials
 from config import (
     SHEET_ID_NC, GOOGLE_CREDENTIALS_FILE, ABA_REQS, ABA_FORNECEDORES, DRIVE_FOLDER_ID,
     SHEET_ID_NC_ORIGEM, ABAS_NC_ORIGEM, RESP_PADRAO,
+    SHEET_ID_CONSOLIDADO, ABA_CONSOLIDADO,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,6 +167,46 @@ def ler_ncs() -> list[dict]:
             resultado.append(r)
 
     logger.info("%d NCs lidas (RESP=%s) das abas %s.", len(resultado), RESP_PADRAO, ABAS_NC_ORIGEM)
+    return resultado
+
+
+_RE_NC = re.compile(r"(\d{4})\s*NC\s*(\d{5,7})", re.IGNORECASE)
+
+
+def _extrair_nc(texto: str) -> str:
+    """Extrai o número da NC (ex: 2026NC000456) de um texto livre — a
+    planilha Consolidado não tem coluna NC própria, só cita a NC na OBS."""
+    m = _RE_NC.search(texto or "")
+    if not m:
+        return ""
+    return f"{m.group(1)}NC{m.group(2)}"
+
+
+def ler_empenhos() -> list[dict]:
+    """Lê os empenhos (NE) da planilha Consolidado — controle de liquidação
+    e pagamento por NE, somente leitura, filtrado por RESP = RESP_PADRAO.
+    Cada registro ganha _NC_DETECTADA com a NC extraída da OBS/DETALHAMENTO,
+    usada para vincular o empenho à sua NC de origem."""
+    client = _conectar()
+    planilha = client.open_by_key(SHEET_ID_CONSOLIDADO)
+    try:
+        ws = planilha.worksheet(ABA_CONSOLIDADO) if ABA_CONSOLIDADO else planilha.get_worksheet(0)
+    except Exception as e:
+        logger.warning("Aba Consolidado não encontrada: %s", e)
+        return []
+
+    resp_alvo = _normaliza_texto(RESP_PADRAO)
+    resultado = []
+    for r in _ws_para_dicts(ws):
+        if not r.get("NE"):
+            continue
+        if _normaliza_texto(r.get("RESP", "")) != resp_alvo:
+            continue
+        texto = f"{r.get('OBS','')} {r.get('DETALHAMENTO','')}"
+        r["_NC_DETECTADA"] = _extrair_nc(texto)
+        resultado.append(r)
+
+    logger.info("%d empenhos lidos (RESP=%s) do Consolidado.", len(resultado), RESP_PADRAO)
     return resultado
 
 
