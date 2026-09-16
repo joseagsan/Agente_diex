@@ -469,6 +469,18 @@ def _frases(tipo: str) -> list[str]:
     return ["— escrever manualmente —"] + ler_frases(tipo)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _sincronizar_atividades_cached(ncs, empenhos, reqs, reqs_salc):
+    from atividades import sincronizar
+    return sincronizar(ncs, empenhos, reqs, reqs_salc)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _ler_atividades_cached(limite: int = 30):
+    from atividades import ler_atividades
+    return ler_atividades(limite)
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _pesquisar_pregao(uasg: str, num_pregao: str, compra_id_direto: str = "") -> tuple:
     """Cache da pesquisa — persiste mesmo com reset de sessão (30 min TTL)."""
@@ -628,6 +640,30 @@ def page_dashboard(ncs, reqs):
         st.warning(f"⚠️ **{ind['vencendo_7d']}** NC(s) vencem nos próximos 7 dias.")
     if ind["ncs_em_tela"] > 0:
         st.info(f"🕐 **{ind['ncs_em_tela']}** NC(s) EM TELA — {fmt(ind['em_tela_total'])} aguardando crédito.")
+
+    st.divider()
+
+    # ── Atualizações recentes (NC nova, empenho realizado, REQ protocolada) ──
+    st.subheader("🔔 Atualizações Recentes")
+    try:
+        atividades = _ler_atividades_cached(20)
+    except Exception as e:
+        atividades = []
+        st.error(f"Erro ao carregar atividades: {e}")
+
+    if not atividades:
+        st.caption("Nenhuma atualização registrada ainda — o feed é preenchido a partir da próxima sincronização.")
+    else:
+        icones = {"Nova NC": "🆕", "Empenho realizado": "💸",
+                  "REQ protocolada": "📝", "REQ registrada (SSAC)": "🗒️"}
+        for ev in atividades:
+            icone = icones.get(ev.get("TIPO", ""), "🔔")
+            valor = f" · **{ev.get('VALOR','')}**" if ev.get("VALOR") else ""
+            st.markdown(
+                f"{icone} **{ev.get('TIPO','')}** — {ev.get('DESCRICAO','')}{valor}  \n"
+                f"<span style='color:#94a3b8;font-size:.8rem;'>{ev.get('DATA_HORA','')}</span>",
+                unsafe_allow_html=True,
+            )
 
     st.divider()
 
@@ -1079,6 +1115,12 @@ def _ler_reqs_cached():
 def _empenhos_cached():
     from sheets_nc import ler_empenhos
     return ler_empenhos()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _reqs_salc_cached():
+    from sheets_nc import ler_reqs_salc
+    return ler_reqs_salc()
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -2697,6 +2739,12 @@ def main():
         st.session_state["page"] = "dashboard"
 
     ncs, reqs, _ = carregar()
+
+    try:
+        _sincronizar_atividades_cached(ncs, _empenhos_cached(), _ler_reqs_cached(), _reqs_salc_cached())
+    except Exception:
+        pass
+
     pagina = _sidebar(ncs, reqs)
 
     if   pagina == "dashboard":  page_dashboard(ncs, reqs)

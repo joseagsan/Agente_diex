@@ -50,3 +50,9 @@ ABA_CONSOLIDADO      = _s("ABA_CONSOLIDADO", "")
 
 # Código de Gestão usado na URL do Portal da Transparência (padrão SIAFI: 00001)
 GESTAO_PADRAO        = _s("GESTAO_PADRAO", "00001")
+
+# Planilha de controle de requisições protocoladas pela SALC (aba "SALC") —
+# fonte de verdade para saber quando uma requisição do GAC foi de fato
+# protocolada (registrada pela SALC), somente leitura.
+SHEET_ID_REQS_SALC   = _s("SHEET_ID_REQS_SALC", "1O-gMC-wYq44gfLoESicRUIQiYH7Hkig06pVfHBV3FcA")
+ABA_REQS_SALC        = _s("ABA_REQS_SALC", "SALC")

@@ -19,6 +19,7 @@ from config import (
     SHEET_ID_NC, GOOGLE_CREDENTIALS_FILE, ABA_REQS, ABA_FORNECEDORES, DRIVE_FOLDER_ID,
     SHEET_ID_NC_ORIGEM, ABAS_NC_ORIGEM, RESP_PADRAO,
     SHEET_ID_CONSOLIDADO, ABA_CONSOLIDADO,
+    SHEET_ID_REQS_SALC, ABA_REQS_SALC,
 )
 
 logger = logging.getLogger(__name__)
@@ -207,6 +208,52 @@ def ler_empenhos() -> list[dict]:
         resultado.append(r)
 
     logger.info("%d empenhos lidos (RESP=%s) do Consolidado.", len(resultado), RESP_PADRAO)
+    return resultado
+
+
+def _processar_bloco_reqs_salc(bloco: list[list[str]], resp_alvo: str, resultado: list[dict]) -> None:
+    """Um bloco é um grupo de linhas contíguas (sem linha em branco) da aba
+    SALC. Só os blocos cujo cabeçalho tem 'Num Doc' e 'OM' representam
+    requisições protocoladas — outros blocos (ex.: controle de Ata/NUP)
+    têm colunas diferentes e são ignorados."""
+    if len(bloco) < 2:
+        return
+    headers = bloco[0]
+    if "Num Doc" not in headers or "OM" not in headers:
+        return
+    for row in bloco[1:]:
+        row = row + [""] * (len(headers) - len(row))
+        r = dict(zip(headers, row))
+        if _normaliza_texto(r.get("OM", "")) == resp_alvo:
+            resultado.append(r)
+
+
+def ler_reqs_salc() -> list[dict]:
+    """Lê a aba SALC da planilha de controle de requisições protocoladas.
+    A aba tem vários blocos de tabela empilhados (separados por linhas em
+    branco, cada um com seu próprio cabeçalho) — só os blocos de
+    requisição (colunas 'Num Doc'/'OM') são considerados. Filtra por
+    OM = RESP_PADRAO, somente leitura."""
+    client = _conectar()
+    planilha = client.open_by_key(SHEET_ID_REQS_SALC)
+    try:
+        ws = planilha.worksheet(ABA_REQS_SALC)
+    except Exception as e:
+        logger.warning("Aba %s não encontrada em SHEET_ID_REQS_SALC: %s", ABA_REQS_SALC, e)
+        return []
+
+    resp_alvo   = _normaliza_texto(RESP_PADRAO)
+    resultado   = []
+    bloco_atual = []
+    for row in ws.get_all_values():
+        if not any(str(c).strip() for c in row):
+            _processar_bloco_reqs_salc(bloco_atual, resp_alvo, resultado)
+            bloco_atual = []
+            continue
+        bloco_atual.append(row)
+    _processar_bloco_reqs_salc(bloco_atual, resp_alvo, resultado)
+
+    logger.info("%d requisições lidas (OM=%s) da aba SALC.", len(resultado), RESP_PADRAO)
     return resultado
 
 
