@@ -470,9 +470,9 @@ def _frases(tipo: str) -> list[str]:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _sincronizar_atividades_cached(ncs, empenhos, reqs):
+def _sincronizar_atividades_cached(ncs, empenhos, reqs, reqs_salc):
     from atividades import sincronizar
-    return sincronizar(ncs, empenhos, reqs)
+    return sincronizar(ncs, empenhos, reqs, reqs_salc)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -654,7 +654,8 @@ def page_dashboard(ncs, reqs):
     if not atividades:
         st.caption("Nenhuma atualização registrada ainda — o feed é preenchido a partir da próxima sincronização.")
     else:
-        icones = {"Nova NC": "🆕", "Empenho realizado": "💸", "REQ protocolada": "📝"}
+        icones = {"Nova NC": "🆕", "Empenho realizado": "💸",
+                  "REQ protocolada": "📝", "REQ registrada (SSAC)": "🗒️"}
         for ev in atividades:
             icone = icones.get(ev.get("TIPO", ""), "🔔")
             valor = f" · **{ev.get('VALOR','')}**" if ev.get("VALOR") else ""
@@ -1114,6 +1115,12 @@ def _ler_reqs_cached():
 def _empenhos_cached():
     from sheets_nc import ler_empenhos
     return ler_empenhos()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _reqs_salc_cached():
+    from sheets_nc import ler_reqs_salc
+    return ler_reqs_salc()
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -2734,7 +2741,7 @@ def main():
     ncs, reqs, _ = carregar()
 
     try:
-        _sincronizar_atividades_cached(ncs, _empenhos_cached(), _ler_reqs_cached())
+        _sincronizar_atividades_cached(ncs, _empenhos_cached(), _ler_reqs_cached(), _reqs_salc_cached())
     except Exception:
         pass
 

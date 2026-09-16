@@ -98,15 +98,26 @@ def _snapshot_req(r: dict) -> dict:
     return {"SITUACAO": r.get("SITUACAO", "")}
 
 
-def sincronizar(ncs: list[dict], empenhos: list[dict], reqs: list[dict]) -> list[dict]:
+def _chave_req_salc(r: dict) -> str:
+    return f"{r.get('Num Doc', '')}_{r.get('DATA', '')}"
+
+
+def _snapshot_req_salc(r: dict) -> dict:
+    return {"SITUAÇÃO": r.get("SITUAÇÃO", "")}
+
+
+def sincronizar(ncs: list[dict], empenhos: list[dict], reqs: list[dict],
+                 reqs_salc: list[dict] | None = None) -> list[dict]:
     """Compara o estado atual com o snapshot salvo, registra eventos para
     o que apareceu de novo desde a última sincronização e atualiza o
     snapshot. Retorna os eventos novos desta chamada (pode ser [])."""
+    reqs_salc = reqs_salc or []
     anterior     = _ler_snapshot()
     primeira_vez = not anterior
-    nc_ant  = anterior.get("NCS", {})
-    emp_ant = anterior.get("EMPENHOS", {})
-    req_ant = anterior.get("REQS", {})
+    nc_ant   = anterior.get("NCS", {})
+    emp_ant  = anterior.get("EMPENHOS", {})
+    req_ant  = anterior.get("REQS", {})
+    rsalc_ant = anterior.get("REQS_SALC", {})
 
     agora   = datetime.now().strftime("%d/%m/%Y %H:%M")
     eventos = []
@@ -153,14 +164,30 @@ def sincronizar(ncs: list[dict], empenhos: list[dict], reqs: list[dict]) -> list
         req_atual[num] = _snapshot_req(r)
         if not primeira_vez and num not in req_ant:
             eventos.append({
-                "DATA_HORA": agora, "TIPO": "REQ protocolada",
-                "DESCRICAO": f"Requisição {num} protocolada — {r.get('EMPRESA','')[:40]} · NC {r.get('NC','')}",
+                "DATA_HORA": agora, "TIPO": "REQ registrada (SSAC)",
+                "DESCRICAO": f"Requisição {num} registrada no SSAC — {r.get('EMPRESA','')[:40]} · NC {r.get('NC','')}",
                 "REF": num, "VALOR": r.get("VALOR", ""),
             })
 
-    mudou = nc_atual != nc_ant or emp_atual != emp_ant or req_atual != req_ant
+    rsalc_atual = {}
+    for r in reqs_salc:
+        chave = _chave_req_salc(r)
+        if not r.get("Num Doc") and not r.get("DATA"):
+            continue
+        rsalc_atual[chave] = _snapshot_req_salc(r)
+        if not primeira_vez and chave not in rsalc_ant:
+            eventos.append({
+                "DATA_HORA": agora, "TIPO": "REQ protocolada",
+                "DESCRICAO": f"Requisição {r.get('Num Doc','')} protocolada pela SALC — "
+                             f"{r.get('EMPRESA','')[:40]} · {r.get('SITUAÇÃO','')}",
+                "REF": r.get("Num Doc", ""), "VALOR": r.get("VALOR", ""),
+            })
+
+    mudou = (nc_atual != nc_ant or emp_atual != emp_ant or req_atual != req_ant or
+             rsalc_atual != rsalc_ant)
     if mudou:
-        _salvar_snapshot({"NCS": nc_atual, "EMPENHOS": emp_atual, "REQS": req_atual})
+        _salvar_snapshot({"NCS": nc_atual, "EMPENHOS": emp_atual, "REQS": req_atual,
+                           "REQS_SALC": rsalc_atual})
     if eventos:
         _registrar_eventos(eventos)
 
