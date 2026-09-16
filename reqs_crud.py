@@ -29,7 +29,21 @@ FASE2_COLUNAS = [
     "DESPACHOS_JSON",
 ]
 
-COLUNAS = COLUNAS_BASE + FASE2_COLUNAS
+# Acompanhamento do processo enquanto a REQ ainda está Pendente (antes do
+# empenho) — onde o papel está parado na cadeia de despachos do SPED.
+# Depois de Empenhada, o acompanhamento passa a ser a própria Fase 2 acima.
+ETAPAS_REQ_PROCESSO = [
+    "Requisição redigida (a autuar)",
+    "Aguardando despacho do Cmt",
+    "Aguardando despacho do Fiscal Administrativo",
+    "Aguardando despacho do OD",
+    "Na SALC (documentação/certidões)",
+    "Aguardando emissão da NE",
+]
+EXTRA_COLUNAS = ["ETAPA_PROCESSO"]
+
+COLUNAS = COLUNAS_BASE + FASE2_COLUNAS + EXTRA_COLUNAS
+_COLUNAS_PRESERVADAS = FASE2_COLUNAS + EXTRA_COLUNAS
 
 
 def _garantir_colunas(ws) -> list[str]:
@@ -214,7 +228,7 @@ def editar_req(req_num: str, dados: dict) -> None:
                 "OBS":          dados.get("OBS", ""),
                 "ITENS_JSON":   _json.dumps(itens, ensure_ascii=False) if itens else "",
             }
-            for campo in FASE2_COLUNAS:
+            for campo in _COLUNAS_PRESERVADAS:
                 linha[campo] = dados[campo] if campo in dados else atual.get(campo, "")
 
             row_vals = [linha.get(c, "") for c in COLUNAS]
@@ -226,8 +240,9 @@ def editar_req(req_num: str, dados: dict) -> None:
 
 
 def atualizar_fase2(req_num: str, campos: dict) -> None:
-    """Atualiza somente os campos da Fase 2 (pós-empenho) de uma REQ, sem
-    tocar nos demais. `campos` deve conter apenas chaves de FASE2_COLUNAS."""
+    """Atualiza campos de acompanhamento de uma REQ (Fase 2 pós-empenho ou
+    ETAPA_PROCESSO pré-empenho), sem tocar nos demais. `campos` deve conter
+    apenas chaves de FASE2_COLUNAS/EXTRA_COLUNAS."""
     ws    = _ws()
     todos = ws.get_all_values()
     if not todos:
@@ -247,14 +262,14 @@ def atualizar_fase2(req_num: str, campos: dict) -> None:
         if str(val).strip() == str(req_num).strip():
             batch = []
             for campo, valor in campos.items():
-                if campo not in FASE2_COLUNAS:
+                if campo not in _COLUNAS_PRESERVADAS:
                     continue
                 c = col(campo)
                 if c:
                     batch.append({"range": rowcol_to_a1(i, c), "values": [[valor]]})
             if batch:
                 ws.batch_update(batch, value_input_option="RAW")
-            logger.info("REQ %s: Fase 2 atualizada (%s)", req_num, list(campos.keys()))
+            logger.info("REQ %s: acompanhamento atualizado (%s)", req_num, list(campos.keys()))
             return
     raise ValueError(f"REQ '{req_num}' não encontrada.")
 

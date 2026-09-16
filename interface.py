@@ -1034,6 +1034,27 @@ def page_reqs(reqs_legado, ncs):
 
     st.divider()
 
+    # ── Situação das REQs Pendentes ──────────────────────────────────
+    pendentes = [r for r in reqs if r.get("SITUACAO") == "Pendente"]
+    if pendentes:
+        from reqs_crud import ETAPAS_REQ_PROCESSO
+        st.subheader("📍 Situação das Requisições Pendentes")
+        st.caption("Onde cada processo está parado no SPED, antes do empenho — atualize na REQ selecionada abaixo.")
+        contagem: dict[str, dict] = {}
+        for r in pendentes:
+            etapa = r.get("ETAPA_PROCESSO", "") or "Sem etapa definida"
+            d = contagem.setdefault(etapa, {"qtd": 0, "valor": 0.0})
+            d["qtd"] += 1
+            d["valor"] += _val(r)
+        ordem = ["Sem etapa definida"] + ETAPAS_REQ_PROCESSO
+        cols = st.columns(len(contagem) or 1)
+        for i, etapa in enumerate(sorted(contagem, key=lambda e: ordem.index(e) if e in ordem else 99)):
+            d = contagem[etapa]
+            with cols[i % len(cols)]:
+                _kpi_card(etapa, str(d["qtd"]), fmt(d["valor"]),
+                          color="#ef4444" if etapa == "Sem etapa definida" else "#fbbf24")
+        st.divider()
+
     # ── Filtros rápidos ────────────────────────────────────────────────
     fc1, fc2 = st.columns([3, 2])
     busca = fc1.text_input("Busca", placeholder="🔍 REQ, NC, Empresa...",
@@ -1143,6 +1164,15 @@ def page_reqs(reqs_legado, ncs):
                                    min_value=0.0, step=0.01, format="%.2f",        key=f"d_val_{detail_req}")
         ec3.caption(f"Data: {r_d.get('DATA', '')}")
 
+        etapa_proc = ""
+        if sit == "Pendente":
+            from reqs_crud import ETAPAS_REQ_PROCESSO
+            etapa_atual = r_d.get("ETAPA_PROCESSO", "")
+            etapa_opts  = [""] + ETAPAS_REQ_PROCESSO
+            etapa_idx   = etapa_opts.index(etapa_atual) if etapa_atual in etapa_opts else 0
+            etapa_proc  = st.selectbox("📍 Etapa do processo (SPED)", etapa_opts, index=etapa_idx,
+                                        key=f"d_etapa_{detail_req}")
+
         st.divider()
         if not st.session_state.get("confirm_del"):
             ba, bb = st.columns(2)
@@ -1152,7 +1182,8 @@ def page_reqs(reqs_legado, ncs):
                     _editar(detail_req, {**r_d,
                         "EMPRESA": emp, "CNPJ": cnpj, "PREGAO": pregao,
                         "NE": ne, "ENTRADA_SALC": entrada,
-                        "OBS": obs, "SITUACAO": sit, "VALOR": val_e})
+                        "OBS": obs, "SITUACAO": sit, "VALOR": val_e,
+                        "ETAPA_PROCESSO": etapa_proc if sit == "Pendente" else ""})
                     _ler_reqs_cached.clear()
                     st.session_state.pop("req_table", None)
                     st.success("✅ REQ atualizada!")
