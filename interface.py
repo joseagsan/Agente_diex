@@ -654,7 +654,7 @@ def page_dashboard(ncs, reqs):
     if not atividades:
         st.caption("Nenhuma atualização registrada ainda — o feed é preenchido a partir da próxima sincronização.")
     else:
-        icones = {"Nova NC": "🆕", "Empenho realizado": "💸",
+        icones = {"Nova NC": "🆕", "NC atualizada": "🔄", "Empenho realizado": "💸",
                   "REQ protocolada": "📝", "REQ registrada (SSAC)": "🗒️"}
         for ev in atividades:
             icone = icones.get(ev.get("TIPO", ""), "🔔")

@@ -86,6 +86,17 @@ def _snapshot_nc(nc: dict) -> dict:
     }
 
 
+def _descricao_mudanca_nc(num: str, antigo: dict, novo: dict) -> str:
+    partes = []
+    if antigo.get("SALDO NC") != novo.get("SALDO NC"):
+        partes.append(f"saldo {antigo.get('SALDO NC') or '—'} → {novo.get('SALDO NC') or '—'}")
+    if antigo.get("RECEBIDO") != novo.get("RECEBIDO"):
+        partes.append(f"recebido {antigo.get('RECEBIDO') or '—'} → {novo.get('RECEBIDO') or '—'}")
+    if antigo.get("SITU") != novo.get("SITU"):
+        partes.append(f"situação {antigo.get('SITU') or '—'} → {novo.get('SITU') or '—'}")
+    return f"NC {num}: " + "; ".join(partes) if partes else f"NC {num} atualizada"
+
+
 def _snapshot_empenho(e: dict) -> dict:
     return {
         "SITUAÇÃO":  e.get("SITUAÇÃO", ""),
@@ -127,13 +138,21 @@ def sincronizar(ncs: list[dict], empenhos: list[dict], reqs: list[dict],
         num = nc.get("NC", "")
         if not num:
             continue
-        nc_atual[num] = _snapshot_nc(nc)
-        if not primeira_vez and num not in nc_ant:
-            eventos.append({
-                "DATA_HORA": agora, "TIPO": "Nova NC",
-                "DESCRICAO": f"NC {num} detectada — {nc.get('ORGÃO','')} · {nc.get('FINALIDADE','')[:60]}",
-                "REF": num, "VALOR": nc.get("RECEBIDO", ""),
-            })
+        snap = _snapshot_nc(nc)
+        if not primeira_vez:
+            if num not in nc_ant:
+                eventos.append({
+                    "DATA_HORA": agora, "TIPO": "Nova NC",
+                    "DESCRICAO": f"NC {num} detectada — {nc.get('ORGÃO','')} · {nc.get('FINALIDADE','')[:60]}",
+                    "REF": num, "VALOR": nc.get("RECEBIDO", ""),
+                })
+            elif snap != nc_ant[num]:
+                eventos.append({
+                    "DATA_HORA": agora, "TIPO": "NC atualizada",
+                    "DESCRICAO": _descricao_mudanca_nc(num, nc_ant[num], snap),
+                    "REF": num, "VALOR": snap.get("SALDO NC", ""),
+                })
+        nc_atual[num] = snap
 
     emp_atual = {}
     for e in empenhos:
