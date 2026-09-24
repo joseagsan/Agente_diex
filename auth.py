@@ -31,15 +31,35 @@ def gerar_hash(senha: str) -> str:
 
 
 def requer_auth():
-    """Bloqueia o app se não autenticado. Chame no início de main()."""
+    """Bloqueia o app se não autenticado. Chame no início de main().
+
+    Mantém um token na URL (?token=...) para sobreviver a uma reconexão do
+    WebSocket do Streamlit (ex: aba ficou em segundo plano por alguns
+    minutos) sem exigir login de novo — só o session_state por si só não
+    sobrevive a uma reconexão, mesmo na mesma aba."""
     if st.session_state.get("_auth"):
+        _persistir_token()
         return
+
+    h = _hash_armazenado()
+    if h and st.query_params.get("token", "") == h:
+        st.session_state["_auth"] = True
+        return
+
     _pagina_login()
     st.stop()
 
 
+def _persistir_token():
+    h = _hash_armazenado()
+    if h and st.query_params.get("token", "") != h:
+        st.query_params["token"] = h
+
+
 def logout():
     st.session_state["_auth"] = False
+    if "token" in st.query_params:
+        del st.query_params["token"]
     st.rerun()
 
 
@@ -84,6 +104,7 @@ def _pagina_login():
         if entrar:
             if verificar(senha):
                 st.session_state["_auth"] = True
+                _persistir_token()
                 st.rerun()
             else:
                 st.error("Senha incorreta.")
