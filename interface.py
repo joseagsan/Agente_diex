@@ -409,6 +409,7 @@ NAV_GRUPOS = [
         ("📋", "Notas de Crédito", "ncs"),
         ("📝", "Requisições",      "reqs"),
         ("📃", "Gerar REQ",        "gerar_req"),
+        ("🤝", "Carona",           "carona"),
     ]),
     ("Dados & Documentos", [
         ("📥", "Importar Dados",   "importar"),
@@ -2684,6 +2685,189 @@ def page_gerar_req(reqs, ncs):
                 st.rerun()
 
 
+def page_carona(ncs):
+    st.title("🤝 Carona (Adesão a ARP)")
+    st.caption("Preencha os dados do processo uma vez e gere DFD, Requisição e Solicitação ao Fornecedor a partir dos mesmos itens.")
+
+    if "carona_itens" not in st.session_state:
+        st.session_state.carona_itens = []
+
+    # ── 1. Dados do processo ────────────────────────────────────────────
+    st.subheader("1. Dados do Processo")
+    with st.form("f_carona_campos"):
+        c1, c2 = st.columns(2)
+        nums_nc = [""] + [nc.get("NC", "") for nc in ncs if nc.get("NC")]
+        nc_sel  = c1.selectbox("NC vinculada", nums_nc, key="carona_nc_sel")
+        data_nc = c2.text_input("Data da NC (opcional, ex: 01JUN26)", key="carona_data_nc")
+
+        c3, c4, c5 = st.columns(3)
+        pregao = c3.text_input("Pregão SRP nº", placeholder="ex: 90001/2026", key="carona_pregao")
+        uasg   = c4.text_input("UASG gerenciadora", placeholder="ex: 1110794", key="carona_uasg")
+        orgao_ger = c5.text_input("Órgão gerenciador", placeholder="ex: SECAAE", key="carona_orgao_ger")
+
+        c6, c7, c8 = st.columns(3)
+        vigencia = c6.text_input("Vigência da ata", placeholder="ex: 10/02/2027", key="carona_vigencia")
+        nd       = c7.text_input("ND", value="339030", key="carona_nd")
+        pi       = c8.text_input("PI", key="carona_pi")
+
+        c9, c10 = st.columns(2)
+        tipo = c9.selectbox("Tipo", ["Ordinário", "Especial", "Suprimento de Fundos"], key="carona_tipo")
+        responsavel = c10.text_input("Responsável (nome e posto)", key="carona_responsavel")
+
+        st.markdown("**Fornecedor**")
+        f1, f2 = st.columns(2)
+        forn_nome = f1.text_input("Razão Social", key="carona_forn_nome")
+        forn_cnpj = f2.text_input("CNPJ", key="carona_forn_cnpj")
+        f3, f4, f5 = st.columns(3)
+        forn_end = f3.text_input("Endereço (opcional)", key="carona_forn_end")
+        forn_tel = f4.text_input("Telefone (opcional)", key="carona_forn_tel")
+        forn_email = f5.text_input("E-mail (opcional)", key="carona_forn_email")
+
+        st.markdown("**Para o DFD**")
+        justificativa_dfd = st.text_area("Justificativa da necessidade", key="carona_just_dfd", height=80)
+        previsao_data = st.text_input("Previsão de data (início da prestação/utilização)", key="carona_previsao")
+
+        st.markdown("**Assinatura**")
+        a1, a2 = st.columns(2)
+        assinante = a1.text_input("Assinante (nome e posto)", key="carona_assinante")
+        cargo     = a2.text_input("Cargo", value="Chefe da Seção de Aquisições do 10º GAC Sl.", key="carona_cargo")
+
+        salvar = st.form_submit_button("✅ Confirmar Dados do Processo", type="primary", use_container_width=True)
+
+    if salvar:
+        nc_d = next((nc for nc in ncs if nc.get("NC") == nc_sel), {}) if nc_sel else {}
+        st.session_state.carona_campos = {
+            "NC": nc_sel, "DATA_NC": data_nc,
+            "PREGAO": pregao, "UASG": uasg, "ORGAO_GERENCIADOR": orgao_ger,
+            "VIGENCIA_ATA": vigencia, "ND": nd, "PI": pi, "TIPO": tipo,
+            "RESPONSAVEL": responsavel,
+            "UASG_ORGAO": UG_PADRAO,
+            "FORNECEDOR_NOME": forn_nome, "FORNECEDOR_CNPJ": _formatar_cnpj(forn_cnpj),
+            "FORNECEDOR_ENDERECO": forn_end, "FORNECEDOR_TELEFONE": forn_tel, "FORNECEDOR_EMAIL": forn_email,
+            "JUSTIFICATIVA_DFD": justificativa_dfd, "PREVISAO_DATA": previsao_data,
+            "ASSINANTE": assinante, "CARGO": cargo,
+        }
+        st.success("✅ Dados do processo confirmados.")
+
+    # ── 2. Itens ─────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("2. Itens")
+
+    with st.form("f_carona_add_item", clear_on_submit=True):
+        ci1, ci2, ci3 = st.columns([1, 1, 5])
+        item_num = ci1.text_input("Item", key="carona_fi_item")
+        si       = ci2.text_input("SI (opcional)", key="carona_fi_si")
+        desc     = ci3.text_input("Descrição", key="carona_fi_desc")
+        ci4, ci5, ci6 = st.columns(3)
+        und   = ci4.text_input("Unid.", value="Und", key="carona_fi_und")
+        qtd   = ci5.number_input("Qtd", min_value=0.0, value=1.0, step=1.0, format="%.3f")
+        vunit = ci6.number_input("Valor Unit. (R$)", min_value=0.0, step=0.01, format="%.2f", key="carona_fi_vunit")
+        add = st.form_submit_button("➕ Adicionar Item", use_container_width=True)
+
+    if add:
+        if item_num and desc and vunit > 0:
+            total = round(qtd * vunit, 2)
+            st.session_state.carona_itens.append({
+                "ORD":            str(len(st.session_state.carona_itens) + 1),
+                "ITEM":           item_num,
+                "SI":             si,
+                "DESCRICAO_ITEM": desc,
+                "UND":            und,
+                "QTD":            str(qtd).replace(".", ","),
+                "VALOR_UNIT":     fmt(vunit),
+                "VALOR_TOTAL":    fmt(total),
+                "_total":         total,
+                "_vunit":         vunit,
+            })
+            st.rerun()
+        else:
+            st.warning("Preencha o Nº do item, a descrição e o valor unitário.")
+
+    if st.session_state.carona_itens:
+        df_it = pd.DataFrame(st.session_state.carona_itens)
+        df_it.insert(0, "🗑️", False)
+        edited = st.data_editor(
+            df_it[["🗑️", "ORD", "ITEM", "SI", "DESCRICAO_ITEM", "UND", "QTD", "VALOR_UNIT", "VALOR_TOTAL"]],
+            use_container_width=True, hide_index=True,
+            column_config={
+                "🗑️":            st.column_config.CheckboxColumn("", width=35),
+                "ORD":            st.column_config.TextColumn("Ord", disabled=True, width="small"),
+                "ITEM":           st.column_config.TextColumn("Item", disabled=True, width="small"),
+                "SI":             st.column_config.TextColumn("SI", width="small"),
+                "DESCRICAO_ITEM": st.column_config.TextColumn("Descrição", disabled=True),
+                "UND":            st.column_config.TextColumn("Und", disabled=True, width="small"),
+                "QTD":            st.column_config.TextColumn("Qtd"),
+                "VALOR_UNIT":     st.column_config.TextColumn("Valor Unit.", disabled=True),
+                "VALOR_TOTAL":    st.column_config.TextColumn("Valor Total", disabled=True),
+            },
+            key="carona_editor_itens",
+        )
+
+        selecionados = [i for i, row in edited.iterrows() if row.get("🗑️")]
+        if selecionados:
+            if st.button(f"🗑️ Apagar {len(selecionados)} item(ns) selecionado(s)",
+                         type="primary", key="btn_carona_apagar_sel"):
+                st.session_state.carona_itens = [
+                    it for i, it in enumerate(st.session_state.carona_itens) if i not in selecionados
+                ]
+                for i, it in enumerate(st.session_state.carona_itens):
+                    it["ORD"] = str(i + 1)
+                st.rerun()
+
+        total_geral = sum(i["_total"] for i in st.session_state.carona_itens)
+        k1, k2 = st.columns([1, 3])
+        k1.metric("💰 Total Geral", fmt(total_geral))
+        with k2:
+            if st.button("🗑️ Limpar todos os itens", key="btn_carona_limpar_itens"):
+                st.session_state.carona_itens = []
+                st.rerun()
+    else:
+        st.info("Nenhum item adicionado ainda.")
+
+    # ── 3. Gerar documentos ──────────────────────────────────────────────
+    st.divider()
+    st.subheader("3. Gerar Documentos")
+
+    campos = st.session_state.get("carona_campos", {})
+    itens  = st.session_state.carona_itens
+
+    if not campos:
+        st.info("Confirme os Dados do Processo (Bloco 1) antes de gerar os documentos.")
+        return
+    if not itens:
+        st.info("Adicione pelo menos um item (Bloco 2) antes de gerar os documentos.")
+        return
+
+    from carona import (
+        gerar_texto_requisicao_carona, gerar_html_requisicao_carona,
+        gerar_texto_dfd, gerar_texto_solicitacao_fornecedor, total_itens,
+    )
+    campos_gerar = {**campos, "VALOR_TOTAL_FMT": fmt(total_itens(itens))}
+    itens_limpos = [{k: v for k, v in i.items() if not k.startswith("_")} for i in itens]
+
+    tab_req, tab_dfd, tab_forn = st.tabs(["📃 Requisição", "📄 DFD", "📧 Solicitação ao Fornecedor"])
+
+    with tab_req:
+        sub1, sub2 = st.tabs(["📋 Com tabela (recomendado)", "🔤 Texto simples"])
+        with sub1:
+            html_req = gerar_html_requisicao_carona(campos_gerar, itens_limpos)
+            st.markdown(
+                f"<div style='background:#fff;padding:16px;border-radius:8px;border:1px solid #ddd;'>{html_req}</div>",
+                unsafe_allow_html=True,
+            )
+        with sub2:
+            texto_req = gerar_texto_requisicao_carona(campos_gerar, itens_limpos)
+            st.code(texto_req, language=None)
+
+    with tab_dfd:
+        texto_dfd = gerar_texto_dfd(campos_gerar, itens_limpos)
+        st.code(texto_dfd, language=None)
+
+    with tab_forn:
+        texto_forn = gerar_texto_solicitacao_fornecedor(campos_gerar, itens_limpos)
+        st.code(texto_forn, language=None)
+
+
 def _num_si(si_str: str) -> str:
     """Extrai só o número de 'SI 16 – Material de expediente' → '16'."""
     import re
@@ -2752,6 +2936,7 @@ def main():
     elif pagina == "reqs":       page_reqs(reqs, ncs)
     elif pagina == "pdf":        page_pdf(ncs)
     elif pagina == "gerar_req":  page_gerar_req(reqs, ncs)
+    elif pagina == "carona":     page_carona(ncs)
     elif pagina == "importar":   page_importar(ncs, reqs)
     elif pagina == "relatorios": page_relatorios(ncs, reqs)
     elif pagina == "assistente": page_assistente(ncs, reqs)
