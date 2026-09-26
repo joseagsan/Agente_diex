@@ -7,7 +7,7 @@ para sobreviver a reinícios do app.
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sheets_nc import _conectar, parse_moeda, format_moeda
 from config import SHEET_ID_NC
@@ -66,8 +66,11 @@ def _registrar_eventos(eventos: list[dict]) -> None:
         ws.delete_rows(2, 1 + excesso)
 
 
-def ler_atividades(limite: int = 30) -> list[dict]:
-    """Retorna os eventos mais recentes primeiro."""
+def ler_atividades(limite: int = 30, dias: int | None = 7) -> list[dict]:
+    """Retorna os eventos mais recentes primeiro, restritos aos últimos
+    `dias` dias (padrão 7) — o histórico completo continua salvo na
+    planilha, mas o feed não fica mostrando sempre as mesmas atualizações
+    antigas indefinidamente. Use dias=None para não filtrar por data."""
     ws   = _ws(ABA_ATIVIDADES, COLUNAS_ATIV)
     rows = ws.get_all_values()
     if len(rows) < 2:
@@ -75,7 +78,19 @@ def ler_atividades(limite: int = 30) -> list[dict]:
     headers = rows[0]
     eventos = [dict(zip(headers, row)) for row in rows[1:]]
     eventos.reverse()
+
+    if dias is not None:
+        limite_data = datetime.now() - timedelta(days=dias)
+        eventos = [e for e in eventos if _dentro_do_periodo(e.get("DATA_HORA", ""), limite_data)]
+
     return eventos[:limite]
+
+
+def _dentro_do_periodo(data_hora: str, limite: datetime) -> bool:
+    try:
+        return datetime.strptime(data_hora, "%d/%m/%Y %H:%M") >= limite
+    except Exception:
+        return True  # não conseguiu interpretar a data — mantém o evento por segurança
 
 
 def _snapshot_nc(nc: dict) -> dict:

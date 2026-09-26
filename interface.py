@@ -646,6 +646,7 @@ def page_dashboard(ncs, reqs):
 
     # ── Atualizações recentes (NC nova, empenho realizado, REQ protocolada) ──
     st.subheader("🔔 Atualizações Recentes")
+    st.caption("Últimos 7 dias — o histórico completo fica salvo na planilha.")
     try:
         atividades = _ler_atividades_cached(20)
     except Exception as e:
@@ -653,7 +654,7 @@ def page_dashboard(ncs, reqs):
         st.error(f"Erro ao carregar atividades: {e}")
 
     if not atividades:
-        st.caption("Nenhuma atualização registrada ainda — o feed é preenchido a partir da próxima sincronização.")
+        st.caption("Nenhuma atualização nos últimos 7 dias.")
     else:
         icones = {"Nova NC": "🆕", "NC atualizada": "🔄", "Empenho realizado": "💸",
                   "REQ protocolada": "📝", "REQ registrada (SSAC)": "🗒️"}
