@@ -124,17 +124,23 @@ def ler_csv_dicts(caminho: str | Path) -> list[dict]:
     linha internas, sem espaços extras)."""
     caminho = Path(caminho)
     with open(caminho, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        linhas = []
-        for row in reader:
-            limpo = {}
-            for k, v in row.items():
-                if k is None:
-                    continue
-                chave = re.sub(r"\s+", " ", k.strip())
-                limpo[chave] = v.strip() if isinstance(v, str) else v
-            linhas.append(limpo)
-        return linhas
+        return limpar_linhas(csv.DictReader(f))
+
+
+def limpar_linhas(linhas) -> list[dict]:
+    """Normaliza as chaves (sem quebras de linha internas, sem espaços
+    extras) e apara os valores texto. Serve tanto para linhas lidas de CSV
+    quanto para as lidas direto do Google Sheets (lista de dicts)."""
+    resultado = []
+    for row in linhas:
+        limpo = {}
+        for k, v in row.items():
+            if k is None:
+                continue
+            chave = re.sub(r"\s+", " ", str(k).strip())
+            limpo[chave] = "" if v is None else str(v).strip()
+        resultado.append(limpo)
+    return resultado
 
 
 # ---------------------------------------------------------------------------
@@ -189,40 +195,47 @@ def _grupo_duplicata_de(nc: str) -> Optional[list[str]]:
 
 
 def carregar_notas_credito(*caminhos_csv: str | Path) -> list[NotaCredito]:
-    """Carrega um ou mais CSVs de 'Controle de Crédito' (ex.: UG 160482 e
-    167482), filtra por RESP = 10º GAC Sl e devolve a lista de NCs.
+    linhas = []
+    for caminho in caminhos_csv:
+        linhas.extend(ler_csv_dicts(caminho))
+    return notas_credito_de_linhas(linhas)
+
+
+def notas_credito_de_linhas(linhas: list[dict]) -> list[NotaCredito]:
+    """Recebe as linhas das abas de 'Controle de Crédito' (ex.: UG 160482 e
+    167482) -- de CSV ou direto do Google Sheets --, filtra por RESP = 10º
+    GAC Sl e devolve a lista de NCs.
 
     Aceita variações de nome de coluna (ÓRGÃO/ORGÃO, 'ENV\\nSECAO', etc.)
-    porque ler_csv_dicts() já normaliza espaços/quebras de linha nas chaves.
+    porque limpar_linhas() normaliza espaços/quebras de linha nas chaves.
     """
     notas: list[NotaCredito] = []
-    for caminho in caminhos_csv:
-        for row in ler_csv_dicts(caminho):
-            resp = row.get("RESP", "")
-            if not eh_10_gac(resp):
-                continue
-            nc = row.get("NC", "").strip()
-            if not nc:
-                continue
-            recebido = parse_valor_brl(row.get("RECEBIDO"))
-            recolhido = parse_valor_brl(row.get("RECOLHIDO"))
-            empenhado = parse_valor_brl(row.get("EMPENHADO"))
-            em_tela = parse_valor_brl(row.get("EM TELA"))
-            notas.append(
-                NotaCredito(
-                    nc=nc,
-                    ug=row.get("UG", "").strip(),
-                    data_nc=row.get("DATA NC", "").strip(),
-                    dias=_fmt_dias(row.get("DIAS", "")),
-                    finalidade=row.get("FINALIDADE", "").strip(),
-                    op=row.get("OP", "").strip(),
-                    recebido=recebido,
-                    recolhido=recolhido,
-                    empenhado=empenhado,
-                    em_tela=em_tela,
-                    situacao=row.get("SITU", "").strip(),
-                )
+    for row in limpar_linhas(linhas):
+        resp = row.get("RESP", "")
+        if not eh_10_gac(resp):
+            continue
+        nc = row.get("NC", "").strip()
+        if not nc:
+            continue
+        recebido = parse_valor_brl(row.get("RECEBIDO"))
+        recolhido = parse_valor_brl(row.get("RECOLHIDO"))
+        empenhado = parse_valor_brl(row.get("EMPENHADO"))
+        em_tela = parse_valor_brl(row.get("EM TELA"))
+        notas.append(
+            NotaCredito(
+                nc=nc,
+                ug=row.get("UG", "").strip(),
+                data_nc=row.get("DATA NC", "").strip(),
+                dias=_fmt_dias(row.get("DIAS", "")),
+                finalidade=row.get("FINALIDADE", "").strip(),
+                op=row.get("OP", "").strip(),
+                recebido=recebido,
+                recolhido=recolhido,
+                empenhado=empenhado,
+                em_tela=em_tela,
+                situacao=row.get("SITU", "").strip(),
             )
+        )
     return notas
 
 
@@ -337,10 +350,14 @@ class NotaEmpenho:
 
 
 def carregar_notas_empenho(caminho_csv: str | Path, e_restos_a_pagar: bool = False) -> list[NotaEmpenho]:
+    return notas_empenho_de_linhas(ler_csv_dicts(caminho_csv), e_restos_a_pagar)
+
+
+def notas_empenho_de_linhas(linhas: list[dict], e_restos_a_pagar: bool = False) -> list[NotaEmpenho]:
     """Carrega Corrente_Consolidado.csv OU RP_Adaptado.csv (mesmo layout de
     colunas), filtra por RESP = 10º GAC Sl."""
     notas: list[NotaEmpenho] = []
-    for row in ler_csv_dicts(caminho_csv):
+    for row in limpar_linhas(linhas):
         resp = row.get("RESP", "")
         if not eh_10_gac(resp):
             continue
@@ -414,8 +431,12 @@ class ItemMaterial:
 
 
 def carregar_material_permanente(caminho_csv: str | Path) -> list[ItemMaterial]:
+    return material_permanente_de_linhas(ler_csv_dicts(caminho_csv))
+
+
+def material_permanente_de_linhas(linhas: list[dict]) -> list[ItemMaterial]:
     itens = []
-    for row in ler_csv_dicts(caminho_csv):
+    for row in limpar_linhas(linhas):
         material = row.get("MATERIAL", "").strip()
         if not material:
             continue

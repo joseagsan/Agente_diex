@@ -418,6 +418,7 @@ NAV_GRUPOS = [
     ("Ferramentas", [
         ("🤖", "Assistente",  "assistente"),
         ("📈", "Relatórios",  "relatorios"),
+        ("📑", "Consulta ao Cmt", "relatorio_cmt"),
     ]),
 ]
 NAV = [item for _, itens in NAV_GRUPOS for item in itens]
@@ -2940,6 +2941,9 @@ def main():
     elif pagina == "carona":     page_carona(ncs)
     elif pagina == "importar":   page_importar(ncs, reqs)
     elif pagina == "relatorios": page_relatorios(ncs, reqs)
+    elif pagina == "relatorio_cmt":
+        from relatorio_cmt import page_relatorio_cmt
+        page_relatorio_cmt()
     elif pagina == "assistente": page_assistente(ncs, reqs)
 
 

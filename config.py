@@ -56,3 +56,16 @@ GESTAO_PADRAO        = _s("GESTAO_PADRAO", "00001")
 # protocolada (registrada pela SALC), somente leitura.
 SHEET_ID_REQS_SALC   = _s("SHEET_ID_REQS_SALC", "1O-gMC-wYq44gfLoESicRUIQiYH7Hkig06pVfHBV3FcA")
 ABA_REQS_SALC        = _s("ABA_REQS_SALC", "SALC")
+
+# --- Documento de Consulta ao Comandante (relatorio_gac) ---
+# Abas lidas direto das planilhas da Bda (somente leitura). As abas de
+# crédito são listadas à parte da ABAS_NC_ORIGEM porque o relatório precisa
+# de todas as UGs do 10º GAC Sl.
+ABAS_RELATORIO_CREDITO = [a.strip() for a in _s("ABAS_RELATORIO_CREDITO", "160482,167482").split(",") if a.strip()]
+ABA_RELATORIO_CORRENTE = _s("ABA_RELATORIO_CORRENTE", "Corrente_Consolidado")
+ABA_RELATORIO_RP       = _s("ABA_RELATORIO_RP", "RP_Adaptado")
+# Planilha "AQUISIÇÃO DE MATERIAL PERMANENTE 2026 10° GAC SL" (1ª aba se vazio)
+SHEET_ID_MATERIAL      = _s("SHEET_ID_MATERIAL", "1XLseN96JNL4VQ3alpz8lzmT0OFNfQTUplHQhnfOJ9_0")
+ABA_MATERIAL           = _s("ABA_MATERIAL", "")
+# Aba (na planilha do SSAC) onde ficam as justificativas por NC/NE
+ABA_JUSTIFICATIVAS     = _s("ABA_JUSTIFICATIVAS", "JUSTIFICATIVAS_CMT")

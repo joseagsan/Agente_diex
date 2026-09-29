@@ -18,7 +18,23 @@ relatorio_gac/
 └── README.md
 ```
 
-## Uso semanal
+## Uso pelo app (SSAC)
+
+No app Streamlit, menu **Ferramentas → 📑 Consulta ao Cmt**. A página lê as
+planilhas direto do Google Sheets (abas `160482`/`167482`,
+`Corrente_Consolidado`, `RP_Adaptado` e a planilha de Material
+Permanente), mostra o relatório e oferece o download do HTML. As
+justificativas por NC/NE são editadas na própria página e ficam salvas na
+aba `JUSTIFICATIVAS_CMT` da planilha do SSAC. As abas/planilhas podem ser
+trocadas pelas variáveis `ABAS_RELATORIO_CREDITO`, `ABA_RELATORIO_CORRENTE`,
+`ABA_RELATORIO_RP`, `SHEET_ID_MATERIAL`, `ABA_MATERIAL` e
+`ABA_JUSTIFICATIVAS` (ver `config.py`).
+
+A planilha de Material Permanente precisa estar compartilhada (Leitor) com
+a conta de serviço do app; se não estiver, a página avisa e aceita o CSV
+por upload.
+
+## Uso semanal pela linha de comando
 
 1. No Google Sheets, exporte como CSV as abas que você atualizou nesta
    rodada (Arquivo → Fazer download → Valores separados por vírgula):

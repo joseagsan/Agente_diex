@@ -77,8 +77,7 @@ def carregar_justificativas() -> dict[str, str]:
 # Construção das seções HTML
 # ---------------------------------------------------------------------------
 
-def secao_sac(caminhos_credito: list[str], justificativas: dict[str, str]) -> tuple[str, str]:
-    notas = core.carregar_notas_credito(*caminhos_credito)
+def secao_sac(notas, justificativas: dict[str, str]) -> tuple[str, str]:
     if not notas:
         return "", ""
 
@@ -297,6 +296,40 @@ def secao_material_permanente(itens) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Montagem do documento (usada pela linha de comando e pelo app Streamlit)
+# ---------------------------------------------------------------------------
+
+def montar_relatorio(notas_credito, notas_consolidado, notas_rp, itens_material,
+                     justificativas: dict[str, str], agora: dt.datetime | None = None) -> str:
+    """Monta o HTML final a partir dos dados já carregados. Seções sem dados
+    ficam de fora; devolve "" se nenhuma seção tiver dados."""
+    secoes = []
+    menu = []
+    for html, item in (
+        secao_sac(notas_credito, justificativas),
+        secao_empenhos_liquidacao(notas_consolidado, notas_rp, justificativas),
+        secao_indicadores(notas_credito, notas_consolidado + notas_rp),
+        secao_material_permanente(itens_material),
+    ):
+        if html:
+            secoes.append(html)
+            menu.append(item)
+
+    if not secoes:
+        return ""
+
+    template = TEMPLATE_PATH.read_text(encoding="utf-8")
+    agora = agora or dt.datetime.now()
+    return (
+        template
+        .replace("{{SECOES}}", "\n".join(secoes))
+        .replace("{{MENU_ITEMS}}", "\n    ".join(menu))
+        .replace("{{DATA_ATUALIZACAO}}", agora.strftime("%d/%m/%Y"))
+        .replace("{{DATA_GERACAO}}", agora.strftime("%d/%m/%Y %H:%M"))
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -316,49 +349,16 @@ def main():
     notas_rp = core.carregar_notas_empenho(args.rp, e_restos_a_pagar=True) if args.rp else []
     itens_material = core.carregar_material_permanente(args.material) if args.material else []
 
-    secoes = []
-    menu = []
-
-    html, item = secao_sac(args.credito, justificativas) if args.credito else ("", "")
-    if html:
-        secoes.append(html)
-        menu.append(item)
-
-    html, item = secao_empenhos_liquidacao(notas_consolidado, notas_rp, justificativas)
-    if html:
-        secoes.append(html)
-        menu.append(item)
-
-    html, item = secao_indicadores(notas_credito, notas_consolidado + notas_rp)
-    if html:
-        secoes.append(html)
-        menu.append(item)
-
-    html, item = secao_material_permanente(itens_material)
-    if html:
-        secoes.append(html)
-        menu.append(item)
-
-    if not secoes:
+    saida_html = montar_relatorio(notas_credito, notas_consolidado, notas_rp, itens_material, justificativas)
+    if not saida_html:
         print("Nenhuma fonte de dados informada -- nada a gerar. Use --credito/--consolidado/--rp/--material.",
               file=sys.stderr)
         sys.exit(1)
-
-    template = TEMPLATE_PATH.read_text(encoding="utf-8")
-    agora = dt.datetime.now()
-    saida_html = (
-        template
-        .replace("{{SECOES}}", "\n".join(secoes))
-        .replace("{{MENU_ITEMS}}", "\n    ".join(menu))
-        .replace("{{DATA_ATUALIZACAO}}", agora.strftime("%d/%m/%Y"))
-        .replace("{{DATA_GERACAO}}", agora.strftime("%d/%m/%Y %H:%M"))
-    )
 
     caminho_saida = Path(args.saida)
     caminho_saida.parent.mkdir(parents=True, exist_ok=True)
     caminho_saida.write_text(saida_html, encoding="utf-8")
     print(f"Relatório gerado em: {caminho_saida}")
-    print(f"Seções incluídas: {len(secoes)}")
     if not JUSTIFICATIVAS_PATH.exists() or JUSTIFICATIVAS_PATH.stat().st_size < 40:
         print(f"Dica: edite {JUSTIFICATIVAS_PATH} para incluir justificativas por NC/NE.")
 
