@@ -21,18 +21,16 @@ relatorio_gac/
 ## Uso pelo app (SSAC)
 
 No app Streamlit, menu **Ferramentas → 📑 Consulta ao Cmt**. A página lê as
-planilhas direto do Google Sheets (abas `160482`/`167482`,
-`Corrente_Consolidado`, `RP_Adaptado` e a planilha de Material
-Permanente), mostra o relatório e oferece o download do HTML. As
-justificativas por NC/NE são editadas na própria página e ficam salvas na
-aba `JUSTIFICATIVAS_CMT` da planilha do SSAC. As abas/planilhas podem ser
-trocadas pelas variáveis `ABAS_RELATORIO_CREDITO`, `ABA_RELATORIO_CORRENTE`,
-`ABA_RELATORIO_RP`, `SHEET_ID_MATERIAL`, `ABA_MATERIAL` e
-`ABA_JUSTIFICATIVAS` (ver `config.py`).
+planilhas direto do Google Sheets — abas de crédito de `ABAS_NC_ORIGEM`
+(`160482`, `167482`) e `Corrente_Consolidado`/`RP_Adaptado` da planilha
+Consolidado —, mostra o relatório (SAC, Empenhos/Liquidação e Indicadores)
+e oferece o download do HTML. As justificativas por NC/NE são editadas na
+própria página e ficam salvas na aba `JUSTIFICATIVAS_CMT` da planilha do
+SSAC. As abas podem ser trocadas pelas variáveis `ABAS_NC_ORIGEM`,
+`ABA_RELATORIO_CORRENTE`, `ABA_RELATORIO_RP` e `ABA_JUSTIFICATIVAS` (ver
+`config.py`).
 
-A planilha de Material Permanente precisa estar compartilhada (Leitor) com
-a conta de serviço do app; se não estiver, a página avisa e aceita o CSV
-por upload.
+A seção de Material Permanente só existe pela linha de comando (`--material`).
 
 ## Uso semanal pela linha de comando
 
@@ -78,7 +76,8 @@ topo do arquivo:
   quando uma NC é considerada "saldo residual" e sai da lista principal do
   SAC.
 - **`GRUPOS_DUPLICATAS`** — grupos de NCs tratadas como duplicata de
-  lançamento (mantém só a primeira da lista como representante).
+  lançamento: só a primeira da lista (representante) pode entrar, e o grupo
+  sai da lista se a representante tiver saldo residual.
 
 As fórmulas fixadas ficam como propriedades das classes `NotaCredito` e
 `NotaEmpenho` no mesmo arquivo:

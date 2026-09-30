@@ -1,14 +1,13 @@
 """
 Página "Consulta ao Cmt" — gera o Documento de Consulta ao Comandante
-(pacote relatorio_gac) lendo as planilhas direto do Google Sheets, sem
-precisar exportar CSVs à mão.
+(pacote relatorio_gac) lendo as planilhas de Controle de Crédito e de
+Empenhos/Liquidação direto do Google Sheets, sem precisar exportar CSVs à
+mão.
 
 As regras de negócio (filtro de RESP, % de empenho/liquidação, NCs
 residuais e duplicatas) e o visual continuam em relatorio_gac/: o app só
 carrega os dados e chama gerar_relatorio.montar_relatorio().
 """
-import csv
-import io
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -18,8 +17,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from config import (
-    SHEET_ID_NC_ORIGEM, SHEET_ID_CONSOLIDADO, SHEET_ID_MATERIAL,
-    ABAS_RELATORIO_CREDITO, ABA_RELATORIO_CORRENTE, ABA_RELATORIO_RP, ABA_MATERIAL,
+    SHEET_ID_NC_ORIGEM, SHEET_ID_CONSOLIDADO,
+    ABAS_NC_ORIGEM, ABA_RELATORIO_CORRENTE, ABA_RELATORIO_RP,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "relatorio_gac" / "scripts"))
@@ -29,10 +28,9 @@ import gerar_relatorio  # noqa: E402
 # Fontes do relatório: chave -> (rótulo, sheet_id, aba)
 _FONTES = {
     **{f"credito_{aba}": (f"Controle de Crédito — {aba}", SHEET_ID_NC_ORIGEM, aba)
-       for aba in ABAS_RELATORIO_CREDITO},
+       for aba in ABAS_NC_ORIGEM},
     "corrente": (f"Empenhos — {ABA_RELATORIO_CORRENTE}", SHEET_ID_CONSOLIDADO, ABA_RELATORIO_CORRENTE),
     "rp":       (f"Restos a Pagar — {ABA_RELATORIO_RP}", SHEET_ID_CONSOLIDADO, ABA_RELATORIO_RP),
-    "material": ("Aquisição de Material Permanente", SHEET_ID_MATERIAL, ABA_MATERIAL),
 }
 
 
@@ -56,15 +54,9 @@ def _ler_justificativas() -> dict:
     return ler_justificativas()
 
 
-def _linhas_csv(arquivo) -> list[dict]:
-    texto = arquivo.getvalue().decode("utf-8-sig")
-    return list(csv.DictReader(io.StringIO(texto)))
-
-
 def page_relatorio_cmt():
     st.title("📑 Documento de Consulta ao Comandante")
-    st.caption("Gerado a partir das planilhas de Controle de Crédito, Empenhos/Liquidação "
-               "e Aquisição de Material Permanente.")
+    st.caption("Gerado a partir das planilhas de Controle de Crédito e de Empenhos/Liquidação.")
 
     if st.button("🔄 Recarregar planilhas"):
         _ler_fontes.clear()
@@ -80,23 +72,16 @@ def page_relatorio_cmt():
                 st.warning(f"⚠️ **{rotulo}** — não foi possível ler: {f['erro']}")
             else:
                 st.markdown(f"✅ **{rotulo}** — {len(f['linhas'])} linha(s)")
-        if fontes["material"]["erro"]:
-            st.info("Se a planilha de Material Permanente não estiver compartilhada com a "
-                    "conta de serviço do app, compartilhe-a (Leitor) ou envie o CSV abaixo.")
-            up = st.file_uploader("CSV de Material Permanente", type="csv", key="rel_cmt_material")
-            if up is not None:
-                fontes = {**fontes, "material": {"linhas": _linhas_csv(up), "erro": ""}}
 
-    linhas_credito = [l for aba in ABAS_RELATORIO_CREDITO for l in fontes[f"credito_{aba}"]["linhas"]]
+    linhas_credito = [l for aba in ABAS_NC_ORIGEM for l in fontes[f"credito_{aba}"]["linhas"]]
     notas_credito = core.notas_credito_de_linhas(linhas_credito)
     notas_corrente = core.notas_empenho_de_linhas(fontes["corrente"]["linhas"], e_restos_a_pagar=False)
     notas_rp = core.notas_empenho_de_linhas(fontes["rp"]["linhas"], e_restos_a_pagar=True)
-    itens_material = core.material_permanente_de_linhas(fontes["material"]["linhas"])
 
     justificativas = _secao_justificativas(notas_credito, notas_rp)
 
     html = gerar_relatorio.montar_relatorio(
-        notas_credito, notas_corrente, notas_rp, itens_material, justificativas,
+        notas_credito, notas_corrente, notas_rp, [], justificativas,
     )
     if not html:
         st.error("Nenhuma fonte de dados disponível — nada a gerar.")

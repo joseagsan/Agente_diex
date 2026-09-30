@@ -273,31 +273,19 @@ def indicador_pct_empenho_global(notas: list[NotaCredito]) -> dict:
 def notas_com_saldo_relevante(notas: list[NotaCredito]) -> list[NotaCredito]:
     """Aplica as duas regras de exclusão da lista 'SAC - em tela':
     1) remove NCs residuais (saldo em tela desprezível)
-    2) para cada grupo de duplicatas, mantém só o representante (1º do grupo)
+    2) grupos de duplicatas contam como um lançamento só, representado pela
+       1ª NC do grupo: as demais nunca entram, e o grupo inteiro sai da
+       lista quando a representante é residual (ou não está nos dados).
     Ordena por NC.
     """
-    relevantes = [n for n in notas if not n.eh_residual]
-
-    vistos_de_grupo: set[str] = set()
-    resultado: list[NotaCredito] = []
-    for n in relevantes:
-        grupo = _grupo_duplicata_de(n.nc)
-        if grupo is None:
-            resultado.append(n)
+    resultado = []
+    for n in notas:
+        if n.eh_residual:
             continue
-        chave_grupo = grupo[0]
-        if chave_grupo in vistos_de_grupo:
-            continue  # já incluímos o representante deste grupo
-        # inclui apenas se esta NC for o representante (primeiro do grupo)
-        # presente nos dados; senão, procura o representante entre 'notas'
-        if n.nc == grupo[0]:
-            resultado.append(n)
-            vistos_de_grupo.add(chave_grupo)
-        else:
-            representante = next((x for x in notas if x.nc == grupo[0]), None)
-            if representante is not None and chave_grupo not in vistos_de_grupo:
-                resultado.append(representante)
-                vistos_de_grupo.add(chave_grupo)
+        grupo = _grupo_duplicata_de(n.nc)
+        if grupo is not None and n.nc != grupo[0]:
+            continue  # duplicata: só a representante do grupo entra
+        resultado.append(n)
 
     resultado.sort(key=lambda n: n.nc)
     return resultado

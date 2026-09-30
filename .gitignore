@@ -12,6 +12,10 @@ __pycache__/
 
 # Outputs e logs
 output/
+# Relatórios gerados (contêm dados de favorecidos/valores)
+relatorio_consulta_comandante*.html
+documento_consulta_comandante*.html
+relatorio_gac/dados/*.html
 *.log
 *.png
 

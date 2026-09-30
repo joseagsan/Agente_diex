@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import html
 import sys
 from pathlib import Path
 
@@ -48,6 +49,12 @@ import core  # noqa: E402
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def esc(valor) -> str:
+    """Escapa texto vindo das planilhas antes de pôr no HTML (um '<' ou '&'
+    numa finalidade não pode quebrar a tabela)."""
+    return html.escape(str(valor or ""))
 TEMPLATE_PATH = BASE_DIR / "templates" / "documento_consulta_comandante.template.html"
 JUSTIFICATIVAS_PATH = BASE_DIR / "dados" / "justificativas.csv"
 
@@ -89,14 +96,14 @@ def secao_sac(notas, justificativas: dict[str, str]) -> tuple[str, str]:
         just = justificativas.get(n.nc, "")
         linhas.append(
             "<tr>"
-            f'<td class="mono">{n.nc}</td>'
-            f"<td>{n.data_nc}</td>"
-            f'<td class="num">{n.dias}</td>'
-            f"<td>{n.finalidade}</td>"
-            f"<td>{n.op}</td>"
+            f'<td class="mono">{esc(n.nc)}</td>'
+            f"<td>{esc(n.data_nc)}</td>"
+            f'<td class="num">{esc(n.dias)}</td>'
+            f"<td>{esc(n.finalidade)}</td>"
+            f"<td>{esc(n.op)}</td>"
             f'<td class="num">{core.fmt_brl(n.recebido)}</td>'
             f'<td class="valor-emtela">{core.fmt_brl(n.em_tela)}</td>'
-            f"<td>{just}</td>"
+            f"<td>{esc(just)}</td>"
             "</tr>"
         )
 
@@ -191,11 +198,11 @@ def secao_empenhos_liquidacao(notas_consolidado, notas_rp, justificativas) -> tu
             just = justificativas.get(n.ne, "")
             linhas_rp.append(
                 "<tr>"
-                f'<td class="mono">{n.ne}</td>'
-                f"<td>{n.nome_fav}</td>"
+                f'<td class="mono">{esc(n.ne)}</td>'
+                f"<td>{esc(n.nome_fav)}</td>"
                 f'<td class="num">{core.fmt_brl(n.a_liquidar + n.em_liquidacao)}</td>'
-                f"<td>{n.situacao}</td>"
-                f"<td>{just}</td>"
+                f"<td>{esc(n.situacao)}</td>"
+                f"<td>{esc(just)}</td>"
                 "</tr>"
             )
         partes.append(f"""
@@ -221,11 +228,11 @@ def secao_empenhos_liquidacao(notas_consolidado, notas_rp, justificativas) -> tu
         for n in pendentes:
             linhas.append(
                 "<tr>"
-                f'<td class="mono">{n.ne}</td>'
-                f"<td>{n.nome_fav}</td>"
-                f"<td>{n.finalidade}</td>"
+                f'<td class="mono">{esc(n.ne)}</td>'
+                f"<td>{esc(n.nome_fav)}</td>"
+                f"<td>{esc(n.finalidade)}</td>"
                 f'<td class="num">{core.fmt_brl(n.a_liquidar + n.em_liquidacao)}</td>'
-                f"<td>{n.situacao}</td>"
+                f"<td>{esc(n.situacao)}</td>"
                 "</tr>"
             )
         partes.append(f"""
@@ -264,13 +271,13 @@ def secao_material_permanente(itens) -> tuple[str, str]:
     for i in itens:
         linhas.append(
             "<tr>"
-            f"<td>{i.material}</td>"
-            f"<td>{i.qtd}</td>"
-            f'<td class="mono">{i.ne}</td>'
-            f'<td class="mono">{i.nc}</td>'
+            f"<td>{esc(i.material)}</td>"
+            f"<td>{esc(i.qtd)}</td>"
+            f'<td class="mono">{esc(i.ne)}</td>'
+            f'<td class="mono">{esc(i.nc)}</td>'
             f'<td class="num">{core.fmt_brl(i.valor_empenhado)}</td>'
             f"<td>{'Sim' if i.chegou else 'Não'}</td>"
-            f"<td>{i.situacao}</td>"
+            f"<td>{esc(i.situacao)}</td>"
             "</tr>"
         )
 
