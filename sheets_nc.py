@@ -19,7 +19,7 @@ from config import (
     SHEET_ID_NC, GOOGLE_CREDENTIALS_FILE, ABA_REQS, ABA_FORNECEDORES, DRIVE_FOLDER_ID,
     SHEET_ID_NC_ORIGEM, ABAS_NC_ORIGEM, RESP_PADRAO,
     SHEET_ID_CONSOLIDADO, ABA_CONSOLIDADO,
-    SHEET_ID_REQS_SALC, ABA_REQS_SALC,
+    SHEET_ID_REQS_SALC, ABA_REQS_SALC, ABA_JUSTIFICATIVAS,
 )
 
 logger = logging.getLogger(__name__)
@@ -387,6 +387,47 @@ def adicionar_req(dados: dict) -> None:
         ws.batch_update(batch, value_input_option="USER_ENTERED")
     logger.info("REQ adicionada na linha %d (pulou %d colunas com fórmula)",
                 proxima_linha, len(formula_cols))
+
+
+def ler_aba(sheet_id: str, aba: str = "") -> list[dict]:
+    """Lê uma aba qualquer (1ª aba se `aba` vazio) como lista de dicts, com
+    os valores formatados como aparecem na planilha. Somente leitura."""
+    client = _conectar()
+    planilha = client.open_by_key(sheet_id)
+    ws = planilha.worksheet(aba) if aba else planilha.get_worksheet(0)
+    return _ws_para_dicts(ws)
+
+
+# ── Justificativas do Documento de Consulta ao Comandante ─────────────────────
+def ler_justificativas() -> dict[str, str]:
+    """Retorna {numero NC/NE: justificativa} da aba ABA_JUSTIFICATIVAS."""
+    try:
+        client = _conectar()
+        ws = client.open_by_key(SHEET_ID_NC).worksheet(ABA_JUSTIFICATIVAS)
+    except Exception:
+        return {}  # aba ainda não existe
+    return {
+        str(r.get("NUMERO", "")).strip(): str(r.get("JUSTIFICATIVA", "")).strip()
+        for r in _ws_para_dicts(ws)
+        if str(r.get("NUMERO", "")).strip()
+    }
+
+
+def salvar_justificativas(justificativas: dict[str, str]) -> None:
+    """Regrava a aba ABA_JUSTIFICATIVAS (criando se não existir) com as
+    justificativas não vazias."""
+    client = _conectar()
+    planilha = client.open_by_key(SHEET_ID_NC)
+    try:
+        ws = planilha.worksheet(ABA_JUSTIFICATIVAS)
+    except Exception:
+        ws = planilha.add_worksheet(title=ABA_JUSTIFICATIVAS, rows=200, cols=2)
+    linhas = [["NUMERO", "JUSTIFICATIVA"]] + [
+        [num, txt] for num, txt in sorted(justificativas.items()) if txt.strip()
+    ]
+    ws.clear()
+    ws.update(range_name="A1", values=linhas, value_input_option="RAW")
+    logger.info("%d justificativas salvas em %s.", len(linhas) - 1, ABA_JUSTIFICATIVAS)
 
 
 # ── Frases padrão ─────────────────────────────────────────────────────────────

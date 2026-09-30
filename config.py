@@ -39,7 +39,7 @@ EMAIL_PASSWORD       = _s("EMAIL_PASSWORD", "")  # senha de app do Gmail
 # O SSAC não edita NCs — elas são lançadas e mantidas pela SALC da Bda.
 # Lemos as abas por UG e filtramos pela coluna RESP (responsável) = RESP_PADRAO.
 SHEET_ID_NC_ORIGEM   = _s("SHEET_ID_NC_ORIGEM", "1PhxwM7BLauZQEYNyR7P-T2i2huwyGLaUAy3YVJpD-fs")
-ABAS_NC_ORIGEM       = [a.strip() for a in _s("ABAS_NC_ORIGEM", "160482,160487").split(",") if a.strip()]
+ABAS_NC_ORIGEM       = [a.strip() for a in _s("ABAS_NC_ORIGEM", "160482,167482").split(",") if a.strip()]
 RESP_PADRAO          = _s("RESP_PADRAO", "10º GAC Sl")
 
 # Planilha "Consolidado" — controle de liquidação/pagamento por NE (empenho),
@@ -56,3 +56,11 @@ GESTAO_PADRAO        = _s("GESTAO_PADRAO", "00001")
 # protocolada (registrada pela SALC), somente leitura.
 SHEET_ID_REQS_SALC   = _s("SHEET_ID_REQS_SALC", "1O-gMC-wYq44gfLoESicRUIQiYH7Hkig06pVfHBV3FcA")
 ABA_REQS_SALC        = _s("ABA_REQS_SALC", "SALC")
+
+# --- Documento de Consulta ao Comandante (relatorio_gac) ---
+# Crédito: mesmas abas de ABAS_NC_ORIGEM. Empenhos: abas da planilha
+# Consolidado (SHEET_ID_CONSOLIDADO), somente leitura.
+ABA_RELATORIO_CORRENTE = _s("ABA_RELATORIO_CORRENTE", "Corrente_Consolidado")
+ABA_RELATORIO_RP       = _s("ABA_RELATORIO_RP", "RP_Adaptado")
+# Aba (na planilha do SSAC) onde ficam as justificativas por NC/NE
+ABA_JUSTIFICATIVAS     = _s("ABA_JUSTIFICATIVAS", "JUSTIFICATIVAS_CMT")

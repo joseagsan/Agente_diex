@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Documento de Consulta ao Comandante - 10º GAC Sl</title>
+<style>
+  :root {
+    --verde-oliva: #4b5320;
+    --verde-oliva-escuro: #3a4019;
+    --dourado: #c5a028;
+    --vermelho: #8b1a1a;
+    --cinza-claro: #f4f4f2;
+    --cinza-borda: #d8d8d2;
+  }
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; background: #fff; color: #222; }
+  header.topo { background: var(--verde-oliva); color: #fff; padding: 24px 32px; }
+  header.topo h1 { margin: 0 0 4px 0; font-size: 22px; }
+  header.topo .subtitulo { color: var(--dourado); font-size: 14px; }
+  .layout { display: flex; }
+  nav.menu { width: 240px; flex-shrink: 0; background: var(--cinza-claro); padding: 20px 12px; border-right: 1px solid var(--cinza-borda); min-height: 100vh; box-sizing: border-box; }
+  nav.menu a { display: block; padding: 8px 10px; margin-bottom: 4px; color: var(--verde-oliva-escuro); text-decoration: none; border-radius: 4px; font-size: 14px; }
+  nav.menu a:hover, nav.menu a.ativo { background: var(--verde-oliva); color: #fff; }
+  main { flex: 1; padding: 24px 36px; max-width: 980px; }
+  section.assunto { margin-bottom: 48px; padding-top: 8px; border-top: 3px solid var(--dourado); }
+  section.assunto h2 { color: var(--verde-oliva); font-size: 20px; margin-top: 16px; }
+  h3.sub { color: var(--verde-oliva-escuro); font-size: 16px; margin-top: 28px; }
+  .resumo-cards { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+  .card { background: var(--cinza-claro); border: 1px solid var(--cinza-borda); border-radius: 8px; padding: 12px 16px; min-width: 150px; flex: 1; }
+  .card .valor { font-size: 20px; font-weight: 700; color: var(--verde-oliva); display: block; }
+  .card .rotulo { font-size: 12px; color: #555; }
+  .card.destaque { border-color: var(--dourado); }
+  .card.destaque .valor { color: var(--dourado); }
+  .card.queda .valor { color: var(--vermelho); }
+  .comparativo-box { background: #eef6ea; border-left: 4px solid #4e8c3a; padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 14px; }
+  .alerta-box { background: #fbeaea; border-left: 4px solid var(--vermelho); padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 14px; }
+  .tabela-scroll { overflow-x: auto; margin: 16px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table caption { text-align: left; font-weight: 600; margin-bottom: 6px; color: var(--verde-oliva-escuro); }
+  th, td { border: 1px solid var(--cinza-borda); padding: 6px 8px; text-align: left; }
+  th { background: var(--verde-oliva); color: #fff; font-weight: 600; }
+  td.mono { font-family: 'Consolas', monospace; }
+  td.num, td.valor-emtela { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:nth-child(even) td { background: #fafaf8; }
+  footer.rodape { text-align: center; font-size: 12px; color: #777; padding: 24px; }
+</style>
+</head>
+<body>
+<header class="topo">
+  <h1>Documento de Consulta ao Comandante</h1>
+  <div class="subtitulo">10º Grupo de Artilharia de Campanha Selvagem (10º GAC Sl) — Boa Vista/RR — Atualização de {{DATA_ATUALIZACAO}}</div>
+</header>
+<div class="layout">
+  <nav class="menu">
+    {{MENU_ITEMS}}
+  </nav>
+  <main>
+    {{SECOES}}
+  </main>
+</div>
+<footer class="rodape">Gerado automaticamente por gerar_relatorio.py em {{DATA_GERACAO}}</footer>
+</body>
+</html>
