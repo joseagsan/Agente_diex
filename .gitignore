@@ -16,6 +16,7 @@ output/
 relatorio_consulta_comandante*.html
 documento_consulta_comandante*.html
 relatorio_gac/dados/*.html
+relatorio_gac/dados/historico_em_tela.csv
 *.log
 *.png
 

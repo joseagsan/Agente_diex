@@ -64,3 +64,6 @@ ABA_RELATORIO_CORRENTE = _s("ABA_RELATORIO_CORRENTE", "Corrente_Consolidado")
 ABA_RELATORIO_RP       = _s("ABA_RELATORIO_RP", "RP_Adaptado")
 # Aba (na planilha do SSAC) onde ficam as justificativas por NC/NE
 ABA_JUSTIFICATIVAS     = _s("ABA_JUSTIFICATIVAS", "JUSTIFICATIVAS_CMT")
+# Aba (na planilha do SSAC) com as fotografias diárias do saldo em tela,
+# usadas no comparativo semanal do relatório
+ABA_HISTORICO_EM_TELA  = _s("ABA_HISTORICO_EM_TELA", "HISTORICO_EM_TELA")
