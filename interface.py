@@ -2883,6 +2883,12 @@ def _ugs_monitoradas_cached():
     return ler_ugs_monitoradas()
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _pregao_da_ata_cached(codigo_ug: str, numero_ata: str, data_vig_inicial: str):
+    from arp_api import consultar_pregao_da_ata
+    return consultar_pregao_da_ata(codigo_ug, numero_ata, data_vig_inicial)
+
+
 def page_atas():
     st.title("📑 Atas de Registro de Preço")
     st.caption(
@@ -2953,25 +2959,39 @@ def page_atas():
         st.info("Nenhuma ata vigente encontrada nesse período para as UGs monitoradas.")
     else:
         linhas = []
-        for a in todas_atas:
-            venc = a.get("dataVigenciaFinal", "")
-            dias_restantes = None
-            try:
-                dias_restantes = (datetime.strptime(venc, "%Y-%m-%d").date() - hoje).days
-            except Exception:
-                pass
-            badge = "⚪"
-            if dias_restantes is not None:
-                badge = "🔴" if dias_restantes < 0 else "🟠" if dias_restantes <= 15 else "🟡" if dias_restantes <= 30 else "🟢"
-            linhas.append({
-                " ":             badge,
-                "Ata":           a.get("numeroAtaRegistroPreco", ""),
-                "UG":            a.get("codigoUnidadeGerenciadora", ""),
-                "Órgão":         a.get("nomeUnidadeGerenciadora", ""),
-                "Vigência Final": venc,
-                "Dias restantes": dias_restantes if dias_restantes is not None else "—",
-                "Situação":      a.get("situacao", ""),
-            })
+        with st.spinner("Localizando o pregão de origem de cada ata..."):
+            for a in todas_atas:
+                venc = a.get("dataVigenciaFinal", "")
+                dias_restantes = None
+                try:
+                    dias_restantes = (datetime.strptime(venc, "%Y-%m-%d").date() - hoje).days
+                except Exception:
+                    pass
+                badge = "⚪"
+                if dias_restantes is not None:
+                    badge = "🔴" if dias_restantes < 0 else "🟠" if dias_restantes <= 15 else "🟡" if dias_restantes <= 30 else "🟢"
+
+                numero_ata   = a.get("numeroAtaRegistroPreco", "")
+                codigo_ug    = a.get("codigoUnidadeGerenciadora", "")
+                vig_inicial  = a.get("dataVigenciaInicial", "")
+                pregao_info  = {}
+                if numero_ata and codigo_ug and vig_inicial:
+                    try:
+                        pregao_info = _pregao_da_ata_cached(codigo_ug, numero_ata, vig_inicial)
+                    except Exception:
+                        pregao_info = {}
+
+                linhas.append({
+                    " ":             badge,
+                    "Ata":           numero_ata,
+                    "Pregão":        pregao_info.get("numeroCompra") or "—",
+                    "Modalidade":    pregao_info.get("modalidade") or a.get("nomeModalidadeCompra", "—"),
+                    "UG":            codigo_ug,
+                    "Órgão":         a.get("nomeUnidadeGerenciadora", ""),
+                    "Vigência Final": venc,
+                    "Dias restantes": dias_restantes if dias_restantes is not None else "—",
+                    "Situação":      a.get("situacao", ""),
+                })
         df_atas = pd.DataFrame(linhas).sort_values("Dias restantes", key=lambda s: pd.to_numeric(s, errors="coerce"))
         st.dataframe(df_atas, use_container_width=True, hide_index=True)
 
