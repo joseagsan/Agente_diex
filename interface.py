@@ -410,6 +410,7 @@ NAV_GRUPOS = [
         ("📝", "Requisições",      "reqs"),
         ("📃", "Gerar REQ",        "gerar_req"),
         ("🤝", "Carona",           "carona"),
+        ("📑", "Atas",             "atas"),
     ]),
     ("Dados & Documentos", [
         ("📥", "Importar Dados",   "importar"),
@@ -2870,6 +2871,150 @@ def page_carona(ncs):
         st.code(texto_forn, language=None)
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _arps_vencendo_cached(codigo_ug: str, data_min: str, data_max: str):
+    from arp_api import consultar_arps_vencendo
+    return consultar_arps_vencendo(codigo_ug, data_min, data_max)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _ugs_monitoradas_cached():
+    from ugs_monitoradas import ler_ugs_monitoradas
+    return ler_ugs_monitoradas()
+
+
+def page_atas():
+    st.title("📑 Atas de Registro de Preço")
+    st.caption(
+        "Acompanha atas das UGs que você escolher — vigência, itens e saldo, via API pública do "
+        "compras.gov.br (sem certificado digital, sem robô)."
+    )
+
+    from ugs_monitoradas import adicionar_ug, remover_ug
+
+    st.subheader("1. UGs monitoradas")
+    with st.form("f_add_ug", clear_on_submit=True):
+        c1, c2, c3 = st.columns([1, 2, 1])
+        nova_ug   = c1.text_input("UASG", placeholder="ex: 1110794")
+        novo_nome = c2.text_input("Nome (opcional)", placeholder="ex: SECAAE")
+        add_ug    = c3.form_submit_button("➕ Adicionar", use_container_width=True)
+
+    if add_ug:
+        if nova_ug.strip():
+            try:
+                adicionar_ug(nova_ug.strip(), novo_nome.strip())
+                _ugs_monitoradas_cached.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao adicionar: {e}")
+        else:
+            st.warning("Informe a UASG.")
+
+    try:
+        ugs = _ugs_monitoradas_cached()
+    except Exception as e:
+        ugs = []
+        st.error(f"Erro ao carregar UGs monitoradas: {e}")
+
+    if not ugs:
+        st.info("Nenhuma UG monitorada ainda. Adicione a UASG gerenciadora de uma ata que você "
+                "acompanha (ex: 1110794 - SECAAE).")
+        return
+
+    cols = st.columns(min(len(ugs), 4))
+    for i, ug in enumerate(ugs):
+        with cols[i % len(cols)]:
+            nome = f" · {ug['NOME']}" if ug.get("NOME") else ""
+            st.markdown(f"**{ug['UG']}**{nome}")
+            if st.button("🗑️ Remover", key=f"rm_ug_{ug['UG']}", use_container_width=True):
+                remover_ug(ug["UG"])
+                _ugs_monitoradas_cached.clear()
+                st.rerun()
+
+    # ── 2. Atas vigentes / vencendo ──────────────────────────────────────
+    st.divider()
+    st.subheader("2. Atas vigentes")
+    dias_janela = st.slider("Vigência final dentro de quantos dias?", 7, 365, 90, key="atas_dias")
+
+    from datetime import date, timedelta
+    hoje     = date.today()
+    data_min = hoje.strftime("%Y-%m-%d")
+    data_max = (hoje + timedelta(days=dias_janela)).strftime("%Y-%m-%d")
+
+    todas_atas = []
+    for ug in ugs:
+        try:
+            atas = _arps_vencendo_cached(ug["UG"], data_min, data_max)
+            todas_atas.extend(atas)
+        except Exception as e:
+            st.error(f"Erro ao consultar UG {ug['UG']}: {e}")
+
+    if not todas_atas:
+        st.info("Nenhuma ata vigente encontrada nesse período para as UGs monitoradas.")
+    else:
+        linhas = []
+        for a in todas_atas:
+            venc = a.get("dataVigenciaFinal", "")
+            dias_restantes = None
+            try:
+                dias_restantes = (datetime.strptime(venc, "%Y-%m-%d").date() - hoje).days
+            except Exception:
+                pass
+            badge = "⚪"
+            if dias_restantes is not None:
+                badge = "🔴" if dias_restantes < 0 else "🟠" if dias_restantes <= 15 else "🟡" if dias_restantes <= 30 else "🟢"
+            linhas.append({
+                " ":             badge,
+                "Ata":           a.get("numeroAtaRegistroPreco", ""),
+                "UG":            a.get("codigoUnidadeGerenciadora", ""),
+                "Órgão":         a.get("nomeUnidadeGerenciadora", ""),
+                "Vigência Final": venc,
+                "Dias restantes": dias_restantes if dias_restantes is not None else "—",
+                "Situação":      a.get("situacao", ""),
+            })
+        df_atas = pd.DataFrame(linhas).sort_values("Dias restantes", key=lambda s: pd.to_numeric(s, errors="coerce"))
+        st.dataframe(df_atas, use_container_width=True, hide_index=True)
+
+    # ── 3. Consultar saldo de um item ────────────────────────────────────
+    st.divider()
+    st.subheader("3. Consultar saldo de um item")
+    st.caption("Informe ata, UG e item para conferir saldo de empenho e se aceita adesão (carona).")
+    ci1, ci2, ci3 = st.columns(3)
+    at_ata  = ci1.text_input("Nº da Ata", placeholder="ex: 00044/2026", key="atas_item_ata")
+    at_ug   = ci2.text_input("UG gerenciadora", placeholder="ex: 1110794", key="atas_item_ug")
+    at_item = ci3.text_input("Nº do Item", placeholder="ex: 00005", key="atas_item_num")
+
+    if st.button("🔍 Consultar item", type="primary"):
+        if at_ata and at_ug and at_item:
+            from arp_api import consultar_saldo_item, consultar_adesao_item
+            try:
+                saldo  = consultar_saldo_item(at_ata, at_ug, at_item)
+                adesao = consultar_adesao_item(at_ata, at_ug, at_item)
+            except Exception as e:
+                st.error(f"Erro ao consultar a API: {e}")
+            else:
+                if saldo:
+                    s = saldo[0]
+                    k1, k2, k3 = st.columns(3)
+                    k1.metric("Qtd. Registrada", s.get("quantidadeRegistrada", "—"))
+                    k2.metric("Qtd. Empenhada",  s.get("quantidadeEmpenhada", "—"))
+                    k3.metric("Saldo",           s.get("saldoEmpenho", "—"))
+                else:
+                    st.info("Nenhum empenho registrado ainda para esse item.")
+
+                if adesao:
+                    ad = adesao[0]
+                    aceita = "✅ Sim" if ad.get("aceitaAdesao") else "❌ Não"
+                    st.write(
+                        f"**Aceita adesão (carona):** {aceita}  ·  "
+                        f"**Saldo para adesão:** {ad.get('saldoAdesoes', '—')}"
+                    )
+                else:
+                    st.info("Sem informação de adesão para esse item.")
+        else:
+            st.warning("Preencha ata, UG e número do item.")
+
+
 def _num_si(si_str: str) -> str:
     """Extrai só o número de 'SI 16 – Material de expediente' → '16'."""
     import re
@@ -2939,6 +3084,7 @@ def main():
     elif pagina == "pdf":        page_pdf(ncs)
     elif pagina == "gerar_req":  page_gerar_req(reqs, ncs)
     elif pagina == "carona":     page_carona(ncs)
+    elif pagina == "atas":       page_atas()
     elif pagina == "importar":   page_importar(ncs, reqs)
     elif pagina == "relatorios": page_relatorios(ncs, reqs)
     elif pagina == "relatorio_cmt":
