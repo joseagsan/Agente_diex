@@ -411,6 +411,7 @@ NAV_GRUPOS = [
         ("📃", "Gerar REQ",        "gerar_req"),
         ("🤝", "Carona",           "carona"),
         ("📑", "Atas",             "atas"),
+        ("🔎", "Buscar Item",      "buscar_item"),
     ]),
     ("Dados & Documentos", [
         ("📥", "Importar Dados",   "importar"),
@@ -3100,6 +3101,219 @@ def page_atas():
                         st.info("Sem informação de adesão para esse item.")
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _uasgs_busca_cached():
+    from uasgs_busca import ler_uasgs_busca
+    return ler_uasgs_busca()
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _buscar_itens_uasg_cached(codigo_ug: str, palavra_chave: str):
+    from busca_item import buscar_itens_por_uasg
+    return buscar_itens_por_uasg(codigo_ug, palavra_chave)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _unidades_item_cached(numero_ata: str, ug_gerenciadora: str, numero_item: str):
+    from arp_api import consultar_adesao_item
+    return consultar_adesao_item(numero_ata, ug_gerenciadora, numero_item)
+
+
+_ROTULOS_PRIORIDADE = {
+    1: "Prioridade 1 — Boa Vista (nossas UASGs)",
+    2: "Prioridade 2 — Boa Vista (outros órgãos)",
+    3: "Prioridade 3 — Manaus (Exército)",
+    4: "Prioridade 4 — Manaus (demais órgãos)",
+}
+
+
+def _valor_unitario_float(item: dict) -> float:
+    try:
+        return float(str(item.get("valorUnitario", "0")).replace(",", "."))
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _renderizar_candidato(c: dict, cobre: str):
+    item, ata = c["item"], c["ata"]
+    desc  = item.get("descricaoItem", "") or item.get("descricaoDetalhada", "")
+    valor = _valor_unitario_float(item)
+    with st.container(border=True):
+        st.markdown(f"**{desc}**")
+        l1, l2, l3 = st.columns(3)
+        l1.metric("Situação", c["situacao"])
+        l2.metric("Qtd. utilizável", f"{c['quantidade_utilizavel']:.0f}")
+        l3.metric("Cobre a necessidade?", cobre)
+        st.caption(
+            f"Ata {item.get('numeroAtaRegistroPreco','—')} · Compra {item.get('numeroCompra','—')} · "
+            f"Gerenciadora {ata.get('nomeUnidadeGerenciadora','—')} ({ata.get('codigoUnidadeGerenciadora','—')}) · "
+            f"Fornecedor {item.get('nomeRazaoSocialFornecedor','—')} · Valor unit. R$ {valor:.2f} · "
+            f"Vigência até {ata.get('dataVigenciaFinal','—')} · {_ROTULOS_PRIORIDADE.get(c.get('_prioridade'), '')}"
+        )
+        st.caption(f"Origem da quantidade: {c['origem_quantidade'] or '—'}")
+        if c["situacao"] == "CARONA" and c.get("aceita_adesao") is not None:
+            st.caption(f"Aceita adesão: {'Sim' if c['aceita_adesao'] else 'Não'}")
+
+
+def page_buscar_item():
+    st.title("🔎 Buscar Item em Atas")
+    st.caption(
+        "Procura um item por palavra-chave nas atas vigentes das suas UASGs, em ordem de "
+        "prioridade, e já calcula se dá pra empenhar direto ou só por carona (50% da "
+        "quantidade registrada da gerenciadora)."
+    )
+    st.info(
+        "A API pública não permite varrer 'todas as UASGs de uma cidade' — só buscar por "
+        "UASG específica. Por isso, fora da Prioridade 1 (já vem pronta), cadastre aqui as "
+        "UASGs que você quer que entrem na busca (ex: unidades do Exército em Manaus).",
+        icon="ℹ️",
+    )
+
+    from uasgs_busca import adicionar_uasg_busca, remover_uasg_busca
+
+    st.subheader("1. UASGs por prioridade")
+    with st.form("f_add_uasg_busca", clear_on_submit=True):
+        c1, c2, c3, c4 = st.columns([1, 2, 1, 1])
+        nova_uasg = c1.text_input("UASG", placeholder="ex: 160907")
+        novo_nome = c2.text_input("Nome (opcional)", placeholder="ex: 1º BLog")
+        nova_prio = c3.selectbox("Prioridade", [1, 2, 3, 4], index=0)
+        add_uasg  = c4.form_submit_button("➕ Adicionar", use_container_width=True)
+
+    if add_uasg:
+        if nova_uasg.strip():
+            try:
+                adicionar_uasg_busca(nova_uasg.strip(), novo_nome.strip(), nova_prio)
+                _uasgs_busca_cached.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao adicionar: {e}")
+        else:
+            st.warning("Informe a UASG.")
+
+    try:
+        uasgs = _uasgs_busca_cached()
+    except Exception as e:
+        uasgs = []
+        st.error(f"Erro ao carregar UASGs: {e}")
+
+    por_prioridade: dict = {1: [], 2: [], 3: [], 4: []}
+    for u in uasgs:
+        try:
+            p = int(u.get("PRIORIDADE", 1) or 1)
+        except ValueError:
+            p = 1
+        por_prioridade.setdefault(p, []).append(u)
+
+    for p in (1, 2, 3, 4):
+        lista = por_prioridade.get(p, [])
+        with st.expander(f"{_ROTULOS_PRIORIDADE[p]} — {len(lista)} UASG(s)", expanded=(p == 1)):
+            if not lista:
+                st.caption("Nenhuma UASG cadastrada nessa prioridade ainda.")
+            for u in lista:
+                cc1, cc2 = st.columns([5, 1])
+                nome = f" · {u['NOME']}" if u.get("NOME") else ""
+                cc1.markdown(f"**{u['UASG']}**{nome}")
+                if cc2.button("🗑️", key=f"rm_uasg_busca_{u['UASG']}"):
+                    remover_uasg_busca(u["UASG"])
+                    _uasgs_busca_cached.clear()
+                    st.rerun()
+
+    if not uasgs:
+        return
+
+    st.divider()
+    st.subheader("2. O que você precisa?")
+    with st.form("f_buscar_item"):
+        bc1, bc2 = st.columns([3, 1])
+        palavra_chave         = bc1.text_input("Palavra-chave", placeholder="ex: HDMI, motosserra, pneu")
+        quantidade_necessaria = bc2.number_input("Quantidade necessária", min_value=1, value=1, step=1)
+        buscar = st.form_submit_button("🔎 Buscar", type="primary", use_container_width=True)
+
+    if not buscar:
+        return
+    if not palavra_chave.strip():
+        st.warning("Informe uma palavra-chave.")
+        return
+
+    from busca_item import classificar_item
+
+    resultado_final     = None
+    parciais_coletados  = []
+    tentadas            = []
+
+    for p in (1, 2, 3, 4):
+        lista_uasgs = por_prioridade.get(p, [])
+        if not lista_uasgs:
+            continue
+        tentadas.append(p)
+        candidatos = []
+
+        with st.spinner(f"Buscando '{palavra_chave}' na {_ROTULOS_PRIORIDADE[p]}..."):
+            for u in lista_uasgs:
+                try:
+                    itens = _buscar_itens_uasg_cached(u["UASG"], palavra_chave.strip())
+                except Exception as e:
+                    st.error(f"Erro ao consultar UASG {u['UASG']}: {e}")
+                    continue
+                for item in itens:
+                    ata = item["_ata"]
+                    try:
+                        unidades = _unidades_item_cached(
+                            item.get("numeroAtaRegistroPreco", ""),
+                            ata.get("codigoUnidadeGerenciadora", ""),
+                            item.get("numeroItem", ""),
+                        )
+                    except Exception:
+                        unidades = []
+                    classificado = classificar_item(item, unidades, UG_PADRAO)
+                    classificado["_prioridade"] = p
+                    candidatos.append(classificado)
+
+        atendem = [c for c in candidatos
+                   if c["situacao"] != "SEM_OPCAO" and c["quantidade_utilizavel"] >= quantidade_necessaria]
+        parciais = [c for c in candidatos
+                    if c["situacao"] != "SEM_OPCAO" and c["quantidade_utilizavel"] < quantidade_necessaria]
+        parciais_coletados.extend(parciais)
+
+        if atendem:
+            atendem.sort(key=lambda c: _valor_unitario_float(c["item"]))
+            resultado_final = {"prioridade": p, "atendem": atendem, "parciais": parciais}
+            break
+
+    st.divider()
+    st.subheader("3. Resultado")
+
+    if resultado_final:
+        st.success(
+            f"Achamos {len(resultado_final['atendem'])} opção(ões) que atendem na "
+            f"{_ROTULOS_PRIORIDADE[resultado_final['prioridade']]}."
+        )
+        for c in resultado_final["atendem"]:
+            _renderizar_candidato(c, cobre="✅ Sim")
+        if resultado_final["parciais"]:
+            with st.expander(
+                f"Outras opções na mesma prioridade (não cobrem sozinhas) — {len(resultado_final['parciais'])}"
+            ):
+                for c in resultado_final["parciais"]:
+                    _renderizar_candidato(c, cobre="◐ Parcial")
+    elif parciais_coletados:
+        st.warning(
+            "Nenhuma opção cobre a quantidade necessária por inteiro em nenhuma prioridade "
+            "cadastrada. Seguem as opções parciais encontradas, como reserva:"
+        )
+        parciais_coletados.sort(key=lambda c: -c["quantidade_utilizavel"])
+        for c in parciais_coletados:
+            _renderizar_candidato(c, cobre="◐ Parcial")
+    else:
+        rotulos_tentadas = ", ".join(_ROTULOS_PRIORIDADE[p] for p in tentadas)
+        st.info(f"Nenhum item com '{palavra_chave}' na descrição foi encontrado ({rotulos_tentadas}).")
+
+    st.caption(
+        "⚠️ A conferência final é sempre a tela do Contratos.gov.br — os saldos mudam a "
+        "qualquer momento (outros órgãos empenham e aderem)."
+    )
+
+
 def _num_si(si_str: str) -> str:
     """Extrai só o número de 'SI 16 – Material de expediente' → '16'."""
     import re
@@ -3170,6 +3384,7 @@ def main():
     elif pagina == "gerar_req":  page_gerar_req(reqs, ncs)
     elif pagina == "carona":     page_carona(ncs)
     elif pagina == "atas":       page_atas()
+    elif pagina == "buscar_item": page_buscar_item()
     elif pagina == "importar":   page_importar(ncs, reqs)
     elif pagina == "relatorios": page_relatorios(ncs, reqs)
     elif pagina == "relatorio_cmt":
