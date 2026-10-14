@@ -2884,9 +2884,9 @@ def _ugs_monitoradas_cached():
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def _pregao_da_ata_cached(codigo_ug: str, numero_ata: str, data_vig_inicial: str):
-    from arp_api import consultar_pregao_da_ata
-    return consultar_pregao_da_ata(codigo_ug, numero_ata, data_vig_inicial)
+def _itens_arp_cached(codigo_ug: str, data_vig_inicial: str):
+    from arp_api import consultar_itens_arp
+    return consultar_itens_arp(codigo_ug, data_vig_inicial, data_vig_inicial)
 
 
 def page_atas():
@@ -2937,9 +2937,8 @@ def page_atas():
                 _ugs_monitoradas_cached.clear()
                 st.rerun()
 
-    # ── 2. Atas vigentes / vencendo ──────────────────────────────────────
+    # ── Busca as atas vigentes e os itens de cada uma (camada base) ──────
     st.divider()
-    st.subheader("2. Atas vigentes")
     dias_janela = st.slider("Vigência final dentro de quantos dias?", 7, 365, 90, key="atas_dias")
 
     from datetime import date, timedelta
@@ -2957,82 +2956,148 @@ def page_atas():
 
     if not todas_atas:
         st.info("Nenhuma ata vigente encontrada nesse período para as UGs monitoradas.")
-    else:
-        linhas = []
-        with st.spinner("Localizando o pregão de origem de cada ata..."):
-            for a in todas_atas:
-                venc = a.get("dataVigenciaFinal", "")
-                dias_restantes = None
-                try:
-                    dias_restantes = (datetime.strptime(venc, "%Y-%m-%d").date() - hoje).days
-                except Exception:
-                    pass
-                badge = "⚪"
-                if dias_restantes is not None:
-                    badge = "🔴" if dias_restantes < 0 else "🟠" if dias_restantes <= 15 else "🟡" if dias_restantes <= 30 else "🟢"
+        return
 
-                numero_ata   = a.get("numeroAtaRegistroPreco", "")
-                codigo_ug    = a.get("codigoUnidadeGerenciadora", "")
-                vig_inicial  = a.get("dataVigenciaInicial", "")
-                pregao_info  = {}
-                if numero_ata and codigo_ug and vig_inicial:
-                    try:
-                        pregao_info = _pregao_da_ata_cached(codigo_ug, numero_ata, vig_inicial)
-                    except Exception:
-                        pregao_info = {}
+    pregoes       = {}  # numero_compra -> {"modalidade": str, "atas": [...]}
+    itens_por_ata = {}  # numero_ata -> [itens]
 
-                linhas.append({
-                    " ":             badge,
-                    "Ata":           numero_ata,
-                    "Pregão":        pregao_info.get("numeroCompra") or "—",
-                    "Modalidade":    pregao_info.get("modalidade") or a.get("nomeModalidadeCompra", "—"),
-                    "UG":            codigo_ug,
-                    "Órgão":         a.get("nomeUnidadeGerenciadora", ""),
-                    "Vigência Final": venc,
-                    "Dias restantes": dias_restantes if dias_restantes is not None else "—",
-                    "Situação":      a.get("situacao", ""),
-                })
-        df_atas = pd.DataFrame(linhas).sort_values("Dias restantes", key=lambda s: pd.to_numeric(s, errors="coerce"))
-        st.dataframe(df_atas, use_container_width=True, hide_index=True)
-
-    # ── 3. Consultar saldo de um item ────────────────────────────────────
-    st.divider()
-    st.subheader("3. Consultar saldo de um item")
-    st.caption("Informe ata, UG e item para conferir saldo de empenho e se aceita adesão (carona).")
-    ci1, ci2, ci3 = st.columns(3)
-    at_ata  = ci1.text_input("Nº da Ata", placeholder="ex: 00044/2026", key="atas_item_ata")
-    at_ug   = ci2.text_input("UG gerenciadora", placeholder="ex: 1110794", key="atas_item_ug")
-    at_item = ci3.text_input("Nº do Item", placeholder="ex: 00005", key="atas_item_num")
-
-    if st.button("🔍 Consultar item", type="primary"):
-        if at_ata and at_ug and at_item:
-            from arp_api import consultar_saldo_item, consultar_adesao_item
+    with st.spinner("Localizando o pregão e os itens de cada ata..."):
+        for a in todas_atas:
+            venc = a.get("dataVigenciaFinal", "")
+            dias_restantes = None
             try:
-                saldo  = consultar_saldo_item(at_ata, at_ug, at_item)
-                adesao = consultar_adesao_item(at_ata, at_ug, at_item)
-            except Exception as e:
-                st.error(f"Erro ao consultar a API: {e}")
-            else:
-                if saldo:
-                    s = saldo[0]
-                    k1, k2, k3 = st.columns(3)
-                    k1.metric("Qtd. Registrada", s.get("quantidadeRegistrada", "—"))
-                    k2.metric("Qtd. Empenhada",  s.get("quantidadeEmpenhada", "—"))
-                    k3.metric("Saldo",           s.get("saldoEmpenho", "—"))
-                else:
-                    st.info("Nenhum empenho registrado ainda para esse item.")
+                dias_restantes = (datetime.strptime(venc, "%Y-%m-%d").date() - hoje).days
+            except Exception:
+                pass
+            badge = "⚪"
+            if dias_restantes is not None:
+                badge = "🔴" if dias_restantes < 0 else "🟠" if dias_restantes <= 15 else "🟡" if dias_restantes <= 30 else "🟢"
 
-                if adesao:
-                    ad = adesao[0]
-                    aceita = "✅ Sim" if ad.get("aceitaAdesao") else "❌ Não"
-                    st.write(
-                        f"**Aceita adesão (carona):** {aceita}  ·  "
-                        f"**Saldo para adesão:** {ad.get('saldoAdesoes', '—')}"
-                    )
+            numero_ata  = a.get("numeroAtaRegistroPreco", "")
+            codigo_ug   = a.get("codigoUnidadeGerenciadora", "")
+            vig_inicial = a.get("dataVigenciaInicial", "")
+
+            itens_data = []
+            if codigo_ug and vig_inicial:
+                try:
+                    itens_data = _itens_arp_cached(codigo_ug, vig_inicial)
+                except Exception:
+                    itens_data = []
+
+            itens_desta_ata = [it for it in itens_data if it.get("numeroAtaRegistroPreco") == numero_ata]
+            itens_por_ata[numero_ata] = itens_desta_ata
+
+            numero_compra = itens_desta_ata[0].get("numeroCompra", "") if itens_desta_ata else ""
+            modalidade = (itens_desta_ata[0].get("nomeModalidadeCompra", "") if itens_desta_ata
+                          else a.get("nomeModalidadeCompra", ""))
+            chave_pregao = numero_compra or "— sem pregão identificado —"
+
+            pregoes.setdefault(chave_pregao, {"modalidade": modalidade, "atas": []})
+            pregoes[chave_pregao]["atas"].append({
+                "numero_ata": numero_ata, "ug": codigo_ug,
+                "orgao": a.get("nomeUnidadeGerenciadora", ""),
+                "vigencia_final": venc, "dias_restantes": dias_restantes,
+                "situacao": a.get("situacao", ""), "badge": badge,
+            })
+
+    # ── 2. Pregões ─────────────────────────────────────────────────────
+    st.subheader("2. Pregões")
+    linhas_pregao = []
+    for pregao, info in pregoes.items():
+        dias_vals = [a["dias_restantes"] for a in info["atas"] if a["dias_restantes"] is not None]
+        linhas_pregao.append({
+            "Pregão":           pregao,
+            "Modalidade":       info["modalidade"],
+            "Qtd. Atas":        len(info["atas"]),
+            "Próx. Vencimento": min(dias_vals) if dias_vals else None,
+        })
+    df_pregoes = pd.DataFrame(linhas_pregao).sort_values(
+        "Próx. Vencimento", key=lambda s: pd.to_numeric(s, errors="coerce"))
+    df_pregoes["Próx. Vencimento"] = df_pregoes["Próx. Vencimento"].apply(
+        lambda v: v if pd.notna(v) else "—")
+
+    st.caption("Clique num pregão para ver as atas dele.")
+    evt_pregao = st.dataframe(
+        df_pregoes, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row", key="atas_pregao_table",
+    )
+    sel_pregao_rows = evt_pregao.selection.rows if (evt_pregao and hasattr(evt_pregao, "selection")) else []
+    pregao_selecionado = df_pregoes.iloc[sel_pregao_rows[0]]["Pregão"] if sel_pregao_rows else None
+
+    if not pregao_selecionado:
+        return
+
+    # ── 3. Atas do pregão selecionado ────────────────────────────────────
+    st.divider()
+    st.subheader(f"3. Atas do pregão {pregao_selecionado}")
+    atas_do_pregao = pregoes[pregao_selecionado]["atas"]
+    df_atas = pd.DataFrame([{
+        " ":              a["badge"],
+        "Ata":            a["numero_ata"],
+        "UG":             a["ug"],
+        "Órgão":          a["orgao"],
+        "Vigência Final": a["vigencia_final"],
+        "Dias restantes": a["dias_restantes"] if a["dias_restantes"] is not None else "—",
+        "Situação":       a["situacao"],
+    } for a in atas_do_pregao]).sort_values("Dias restantes", key=lambda s: pd.to_numeric(s, errors="coerce"))
+
+    st.caption("Clique numa ata para ver os itens dela.")
+    evt_ata = st.dataframe(
+        df_atas, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row", key=f"atas_table_{pregao_selecionado}",
+    )
+    sel_ata_rows = evt_ata.selection.rows if (evt_ata and hasattr(evt_ata, "selection")) else []
+    ata_selecionada = df_atas.iloc[sel_ata_rows[0]]["Ata"] if sel_ata_rows else None
+
+    if not ata_selecionada:
+        return
+
+    # ── 4. Itens da ata selecionada ───────────────────────────────────────
+    st.divider()
+    st.subheader(f"4. Itens da ata {ata_selecionada}")
+    itens = itens_por_ata.get(ata_selecionada, [])
+    ug_da_ata = next((a["ug"] for a in atas_do_pregao if a["numero_ata"] == ata_selecionada), "")
+
+    if not itens:
+        st.info("Nenhum item encontrado para essa ata.")
+        return
+
+    for it in itens:
+        numero_item = it.get("numeroItem", "")
+        desc = it.get("descricaoItem", "") or it.get("descricaoDetalhada", "")
+        with st.expander(f"Item {numero_item} — {desc[:70]}"):
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Qtd. Registrada", it.get("quantidadeRegistrada", "—"))
+            k2.metric("Valor Unitário",  it.get("valorUnitario", "—"))
+            k3.metric("Unidade",         it.get("unidadeMedida", "—"))
+            st.caption(f"Fornecedor: {it.get('nomeRazaoSocialFornecedor','—')} · {it.get('niFornecedor','—')}")
+
+            if st.button("🔍 Consultar saldo/adesão", key=f"saldo_{ata_selecionada}_{numero_item}"):
+                from arp_api import consultar_saldo_item, consultar_adesao_item
+                try:
+                    saldo  = consultar_saldo_item(ata_selecionada, ug_da_ata, numero_item)
+                    adesao = consultar_adesao_item(ata_selecionada, ug_da_ata, numero_item)
+                except Exception as e:
+                    st.error(f"Erro ao consultar a API: {e}")
                 else:
-                    st.info("Sem informação de adesão para esse item.")
-        else:
-            st.warning("Preencha ata, UG e número do item.")
+                    if saldo:
+                        s = saldo[0]
+                        sk1, sk2, sk3 = st.columns(3)
+                        sk1.metric("Qtd. Registrada", s.get("quantidadeRegistrada", "—"))
+                        sk2.metric("Qtd. Empenhada",  s.get("quantidadeEmpenhada", "—"))
+                        sk3.metric("Saldo",           s.get("saldoEmpenho", "—"))
+                    else:
+                        st.info("Nenhum empenho registrado ainda para esse item.")
+
+                    if adesao:
+                        ad = adesao[0]
+                        aceita = "✅ Sim" if ad.get("aceitaAdesao") else "❌ Não"
+                        st.write(
+                            f"**Aceita adesão (carona):** {aceita}  ·  "
+                            f"**Saldo para adesão:** {ad.get('saldoAdesoes', '—')}"
+                        )
+                    else:
+                        st.info("Sem informação de adesão para esse item.")
 
 
 def _num_si(si_str: str) -> str:

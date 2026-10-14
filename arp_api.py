@@ -66,22 +66,6 @@ def consultar_itens_arp(codigo_ug: str, data_vig_inicial_min: str, data_vig_inic
     return _paginar("2_consultarARPItem", params)
 
 
-def consultar_pregao_da_ata(codigo_ug: str, numero_ata: str, data_vigencia_inicial: str) -> dict:
-    """Tenta descobrir o pregão/compra de origem de uma ata. O endpoint de
-    itens (consultarARPItem) não aceita o número da ata como filtro, então
-    usamos a própria data de vigência inicial da ata (retornada por
-    consultar_arps_vencendo) como janela exata de busca — min=max — e
-    filtramos o resultado pelo número da ata. Retorna {} se não achar."""
-    itens = consultar_itens_arp(codigo_ug, data_vigencia_inicial, data_vigencia_inicial)
-    for it in itens:
-        if it.get("numeroAtaRegistroPreco") == numero_ata:
-            return {
-                "numeroCompra": it.get("numeroCompra", ""),
-                "modalidade":   it.get("nomeModalidadeCompra", ""),
-            }
-    return {}
-
-
 def consultar_saldo_item(numero_ata: str, unidade_gerenciadora: str, numero_item: str) -> list[dict]:
     """Saldo de empenho do item: quantidadeRegistrada, quantidadeEmpenhada,
     saldoEmpenho. Resultado vazio é normal — significa que ainda não houve
