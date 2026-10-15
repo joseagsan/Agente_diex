@@ -26,17 +26,22 @@ def _bate_palavra_chave(item: dict, palavra_chave: str) -> bool:
     return alvo in texto
 
 
-def buscar_itens_por_uasg(codigo_ug: str, palavra_chave: str, dias_vigencia_max: int = 730) -> list[dict]:
-    """Varre as atas vigentes de uma UASG gerenciadora e retorna os itens cuja
-    descrição bate com a palavra-chave. Cada item vem com a chave extra
-    "_ata" apontando para a ata de origem (vigência, gerenciadora etc)."""
+def listar_itens_vigentes_por_uasg(codigo_ug: str, dias_vigencia_max: int = 730) -> list[dict]:
+    """Varre as atas vigentes de uma UASG gerenciadora e retorna TODOS os
+    itens delas (sem filtro de palavra-chave), cada um com a chave extra
+    "_ata" apontando para a ata de origem (vigência, gerenciadora etc).
+
+    Pensada para ser cacheada uma vez por UASG e reaproveitada em várias
+    buscas por palavra-chave diferentes (ver filtrar_por_palavra_chave) —
+    buscar vários itens de uma vez não deve refazer as mesmas chamadas à
+    API para a mesma UASG."""
     hoje = date.today()
     data_min = hoje.strftime("%Y-%m-%d")
     data_max = (hoje + timedelta(days=dias_vigencia_max)).strftime("%Y-%m-%d")
 
     atas = consultar_arps_vencendo(codigo_ug, data_min, data_max)
 
-    encontrados = []
+    todos = []
     cache_itens: dict[str, list[dict]] = {}
     for ata in atas:
         vig_inicial = ata.get("dataVigenciaInicial", "")
@@ -48,9 +53,22 @@ def buscar_itens_por_uasg(codigo_ug: str, palavra_chave: str, dias_vigencia_max:
         for it in cache_itens[vig_inicial]:
             if it.get("numeroAtaRegistroPreco") != numero_ata:
                 continue
-            if _bate_palavra_chave(it, palavra_chave):
-                encontrados.append({**it, "_ata": ata})
-    return encontrados
+            todos.append({**it, "_ata": ata})
+    return todos
+
+
+def filtrar_por_palavra_chave(itens: list[dict], palavra_chave: str) -> list[dict]:
+    """Filtro em memória (sem chamada de API) dos itens cuja descrição bate
+    com a palavra-chave, sem diferenciar maiúsculas/minúsculas nem acento."""
+    return [it for it in itens if _bate_palavra_chave(it, palavra_chave)]
+
+
+def buscar_itens_por_uasg(codigo_ug: str, palavra_chave: str, dias_vigencia_max: int = 730) -> list[dict]:
+    """Atalho de conveniência para uma única palavra-chave. Para buscar
+    várias palavras-chave na mesma UASG, prefira chamar
+    listar_itens_vigentes_por_uasg() uma vez e filtrar com
+    filtrar_por_palavra_chave() para cada palavra-chave."""
+    return filtrar_por_palavra_chave(listar_itens_vigentes_por_uasg(codigo_ug, dias_vigencia_max), palavra_chave)
 
 
 def classificar_item(item: dict, unidades: list[dict], codigo_ug_propria: str) -> dict:
