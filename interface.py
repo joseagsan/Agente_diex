@@ -3108,9 +3108,12 @@ def _uasgs_busca_cached():
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def _buscar_itens_uasg_cached(codigo_ug: str, palavra_chave: str):
-    from busca_item import buscar_itens_por_uasg
-    return buscar_itens_por_uasg(codigo_ug, palavra_chave)
+def _itens_uasg_busca_cached(codigo_ug: str):
+    """Todos os itens vigentes de uma UASG, sem filtro de palavra-chave —
+    cacheado uma vez por UASG e reaproveitado por todas as buscas, para que
+    pesquisar vários itens de uma vez não refaça a mesma chamada à API."""
+    from busca_item import listar_itens_vigentes_por_uasg
+    return listar_itens_vigentes_por_uasg(codigo_ug)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -3153,6 +3156,85 @@ def _renderizar_candidato(c: dict, cobre: str):
         st.caption(f"Origem da quantidade: {c['origem_quantidade'] or '—'}")
         if c["situacao"] == "CARONA" and c.get("aceita_adesao") is not None:
             st.caption(f"Aceita adesão: {'Sim' if c['aceita_adesao'] else 'Não'}")
+
+
+def _executar_busca_cascata(palavra_chave: str, quantidade_necessaria: float, por_prioridade: dict):
+    """Busca um item em cascata pelas prioridades 1→4 (pula as sem UASG
+    cadastrada) e para assim que uma prioridade render opção(ões) que
+    cobrem a quantidade necessária por inteiro."""
+    from busca_item import classificar_item, filtrar_por_palavra_chave
+
+    resultado_final    = None
+    parciais_coletados = []
+    tentadas           = []
+
+    for p in (1, 2, 3, 4):
+        lista_uasgs = por_prioridade.get(p, [])
+        if not lista_uasgs:
+            continue
+        tentadas.append(p)
+        candidatos = []
+
+        for u in lista_uasgs:
+            try:
+                todos_itens = _itens_uasg_busca_cached(u["UASG"])
+            except Exception as e:
+                st.error(f"Erro ao consultar UASG {u['UASG']}: {e}")
+                continue
+            itens = filtrar_por_palavra_chave(todos_itens, palavra_chave)
+            for item in itens:
+                ata = item["_ata"]
+                try:
+                    unidades = _unidades_item_cached(
+                        item.get("numeroAtaRegistroPreco", ""),
+                        ata.get("codigoUnidadeGerenciadora", ""),
+                        item.get("numeroItem", ""),
+                    )
+                except Exception:
+                    unidades = []
+                classificado = classificar_item(item, unidades, UG_PADRAO)
+                classificado["_prioridade"] = p
+                candidatos.append(classificado)
+
+        atendem = [c for c in candidatos
+                   if c["situacao"] != "SEM_OPCAO" and c["quantidade_utilizavel"] >= quantidade_necessaria]
+        parciais = [c for c in candidatos
+                    if c["situacao"] != "SEM_OPCAO" and c["quantidade_utilizavel"] < quantidade_necessaria]
+        parciais_coletados.extend(parciais)
+
+        if atendem:
+            atendem.sort(key=lambda c: _valor_unitario_float(c["item"]))
+            resultado_final = {"prioridade": p, "atendem": atendem, "parciais": parciais}
+            break
+
+    return resultado_final, parciais_coletados, tentadas
+
+
+def _renderizar_resultado_busca(palavra_chave: str, resultado_final, parciais_coletados, tentadas):
+    if resultado_final:
+        st.success(
+            f"Achamos {len(resultado_final['atendem'])} opção(ões) que atendem na "
+            f"{_ROTULOS_PRIORIDADE[resultado_final['prioridade']]}."
+        )
+        for c in resultado_final["atendem"]:
+            _renderizar_candidato(c, cobre="✅ Sim")
+        if resultado_final["parciais"]:
+            with st.expander(
+                f"Outras opções na mesma prioridade (não cobrem sozinhas) — {len(resultado_final['parciais'])}"
+            ):
+                for c in resultado_final["parciais"]:
+                    _renderizar_candidato(c, cobre="◐ Parcial")
+    elif parciais_coletados:
+        st.warning(
+            "Nenhuma opção cobre a quantidade necessária por inteiro em nenhuma prioridade "
+            "cadastrada. Seguem as opções parciais encontradas, como reserva:"
+        )
+        parciais_coletados.sort(key=lambda c: -c["quantidade_utilizavel"])
+        for c in parciais_coletados:
+            _renderizar_candidato(c, cobre="◐ Parcial")
+    else:
+        rotulos_tentadas = ", ".join(_ROTULOS_PRIORIDADE[p] for p in tentadas)
+        st.info(f"Nenhum item com '{palavra_chave}' na descrição foi encontrado ({rotulos_tentadas}).")
 
 
 def page_buscar_item():
@@ -3223,90 +3305,70 @@ def page_buscar_item():
 
     st.divider()
     st.subheader("2. O que você precisa?")
-    with st.form("f_buscar_item"):
-        bc1, bc2 = st.columns([3, 1])
-        palavra_chave         = bc1.text_input("Palavra-chave", placeholder="ex: HDMI, motosserra, pneu")
-        quantidade_necessaria = bc2.number_input("Quantidade necessária", min_value=1, value=1, step=1)
-        buscar = st.form_submit_button("🔎 Buscar", type="primary", use_container_width=True)
+    st.caption("Monte a lista — dá pra buscar vários itens de uma vez.")
 
-    if not buscar:
+    if "busca_lista_itens" not in st.session_state:
+        st.session_state["busca_lista_itens"] = []
+    lista_itens = st.session_state["busca_lista_itens"]
+
+    with st.form("f_add_item_busca", clear_on_submit=True):
+        bc1, bc2, bc3 = st.columns([3, 1, 1])
+        nova_palavra = bc1.text_input("Palavra-chave", placeholder="ex: HDMI, motosserra, pneu")
+        nova_qtd     = bc2.number_input("Quantidade", min_value=1, value=1, step=1)
+        add_item     = bc3.form_submit_button("➕ Adicionar à lista", use_container_width=True)
+
+    if add_item:
+        if nova_palavra.strip():
+            lista_itens.append({"palavra_chave": nova_palavra.strip(), "quantidade": nova_qtd})
+            st.rerun()
+        else:
+            st.warning("Informe a palavra-chave.")
+
+    if lista_itens:
+        for i, pedido in enumerate(lista_itens):
+            ic1, ic2 = st.columns([6, 1])
+            ic1.markdown(f"**{pedido['palavra_chave']}** — qtd. {pedido['quantidade']:.0f}")
+            if ic2.button("🗑️", key=f"rm_item_busca_{i}"):
+                lista_itens.pop(i)
+                st.rerun()
+    else:
+        st.caption("Nenhum item na lista ainda. Adicione pelo menos um acima.")
+
+    bt1, bt2 = st.columns([3, 1])
+    buscar_todos = bt1.button(
+        "🔎 Buscar todos os itens", type="primary", use_container_width=True, disabled=not lista_itens
+    )
+    if bt2.button("Limpar lista", use_container_width=True, disabled=not lista_itens):
+        st.session_state["busca_lista_itens"] = []
+        st.rerun()
+
+    if not buscar_todos:
         return
-    if not palavra_chave.strip():
-        st.warning("Informe uma palavra-chave.")
-        return
-
-    from busca_item import classificar_item
-
-    resultado_final     = None
-    parciais_coletados  = []
-    tentadas            = []
-
-    for p in (1, 2, 3, 4):
-        lista_uasgs = por_prioridade.get(p, [])
-        if not lista_uasgs:
-            continue
-        tentadas.append(p)
-        candidatos = []
-
-        with st.spinner(f"Buscando '{palavra_chave}' na {_ROTULOS_PRIORIDADE[p]}..."):
-            for u in lista_uasgs:
-                try:
-                    itens = _buscar_itens_uasg_cached(u["UASG"], palavra_chave.strip())
-                except Exception as e:
-                    st.error(f"Erro ao consultar UASG {u['UASG']}: {e}")
-                    continue
-                for item in itens:
-                    ata = item["_ata"]
-                    try:
-                        unidades = _unidades_item_cached(
-                            item.get("numeroAtaRegistroPreco", ""),
-                            ata.get("codigoUnidadeGerenciadora", ""),
-                            item.get("numeroItem", ""),
-                        )
-                    except Exception:
-                        unidades = []
-                    classificado = classificar_item(item, unidades, UG_PADRAO)
-                    classificado["_prioridade"] = p
-                    candidatos.append(classificado)
-
-        atendem = [c for c in candidatos
-                   if c["situacao"] != "SEM_OPCAO" and c["quantidade_utilizavel"] >= quantidade_necessaria]
-        parciais = [c for c in candidatos
-                    if c["situacao"] != "SEM_OPCAO" and c["quantidade_utilizavel"] < quantidade_necessaria]
-        parciais_coletados.extend(parciais)
-
-        if atendem:
-            atendem.sort(key=lambda c: _valor_unitario_float(c["item"]))
-            resultado_final = {"prioridade": p, "atendem": atendem, "parciais": parciais}
-            break
 
     st.divider()
     st.subheader("3. Resultado")
 
-    if resultado_final:
-        st.success(
-            f"Achamos {len(resultado_final['atendem'])} opção(ões) que atendem na "
-            f"{_ROTULOS_PRIORIDADE[resultado_final['prioridade']]}."
-        )
-        for c in resultado_final["atendem"]:
-            _renderizar_candidato(c, cobre="✅ Sim")
-        if resultado_final["parciais"]:
-            with st.expander(
-                f"Outras opções na mesma prioridade (não cobrem sozinhas) — {len(resultado_final['parciais'])}"
-            ):
-                for c in resultado_final["parciais"]:
-                    _renderizar_candidato(c, cobre="◐ Parcial")
-    elif parciais_coletados:
-        st.warning(
-            "Nenhuma opção cobre a quantidade necessária por inteiro em nenhuma prioridade "
-            "cadastrada. Seguem as opções parciais encontradas, como reserva:"
-        )
-        parciais_coletados.sort(key=lambda c: -c["quantidade_utilizavel"])
-        for c in parciais_coletados:
-            _renderizar_candidato(c, cobre="◐ Parcial")
-    else:
-        rotulos_tentadas = ", ".join(_ROTULOS_PRIORIDADE[p] for p in tentadas)
-        st.info(f"Nenhum item com '{palavra_chave}' na descrição foi encontrado ({rotulos_tentadas}).")
+    for idx, pedido in enumerate(lista_itens):
+        palavra_chave         = pedido["palavra_chave"]
+        quantidade_necessaria = pedido["quantidade"]
+
+        with st.spinner(f"Buscando '{palavra_chave}'..."):
+            resultado_final, parciais_coletados, tentadas = _executar_busca_cascata(
+                palavra_chave, quantidade_necessaria, por_prioridade
+            )
+
+        if resultado_final:
+            titulo = (
+                f"✅ {palavra_chave} (qtd. {quantidade_necessaria:.0f}) — atendido na "
+                f"{_ROTULOS_PRIORIDADE[resultado_final['prioridade']]}"
+            )
+        elif parciais_coletados:
+            titulo = f"◐ {palavra_chave} (qtd. {quantidade_necessaria:.0f}) — só opções parciais"
+        else:
+            titulo = f"❌ {palavra_chave} (qtd. {quantidade_necessaria:.0f}) — nada encontrado"
+
+        with st.expander(titulo, expanded=(idx == 0)):
+            _renderizar_resultado_busca(palavra_chave, resultado_final, parciais_coletados, tentadas)
 
     st.caption(
         "⚠️ A conferência final é sempre a tela do Contratos.gov.br — os saldos mudam a "
