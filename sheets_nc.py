@@ -19,7 +19,7 @@ from config import (
     SHEET_ID_NC, GOOGLE_CREDENTIALS_FILE, ABA_REQS, ABA_FORNECEDORES, DRIVE_FOLDER_ID,
     SHEET_ID_NC_ORIGEM, ABAS_NC_ORIGEM, RESP_PADRAO,
     SHEET_ID_CONSOLIDADO, ABA_CONSOLIDADO,
-    SHEET_ID_REQS_SALC, ABA_REQS_SALC, ABA_JUSTIFICATIVAS,
+    SHEET_ID_REQS_SALC, ABA_REQS_SALC, ABA_JUSTIFICATIVAS, ABA_HISTORICO_EM_TELA,
 )
 
 logger = logging.getLogger(__name__)
@@ -428,6 +428,32 @@ def salvar_justificativas(justificativas: dict[str, str]) -> None:
     ws.clear()
     ws.update(range_name="A1", values=linhas, value_input_option="RAW")
     logger.info("%d justificativas salvas em %s.", len(linhas) - 1, ABA_JUSTIFICATIVAS)
+
+
+def ler_historico_em_tela() -> list[dict]:
+    """Linhas {DATA, NC, EM_TELA} da aba ABA_HISTORICO_EM_TELA ([] se não existir)."""
+    try:
+        client = _conectar()
+        ws = client.open_by_key(SHEET_ID_NC).worksheet(ABA_HISTORICO_EM_TELA)
+    except Exception:
+        return []
+    return _ws_para_dicts(ws)
+
+
+def registrar_fotografia_em_tela(linhas: list[list[str]]) -> None:
+    """Acrescenta linhas [DATA, NC, EM_TELA] à aba ABA_HISTORICO_EM_TELA,
+    criando a aba se não existir."""
+    if not linhas:
+        return
+    client = _conectar()
+    planilha = client.open_by_key(SHEET_ID_NC)
+    try:
+        ws = planilha.worksheet(ABA_HISTORICO_EM_TELA)
+    except Exception:
+        ws = planilha.add_worksheet(title=ABA_HISTORICO_EM_TELA, rows=1000, cols=3)
+        ws.update(range_name="A1", values=[["DATA", "NC", "EM_TELA"]], value_input_option="RAW")
+    ws.append_rows(linhas, value_input_option="RAW")
+    logger.info("Fotografia do saldo em tela registrada (%d NCs).", len(linhas))
 
 
 # ── Frases padrão ─────────────────────────────────────────────────────────────

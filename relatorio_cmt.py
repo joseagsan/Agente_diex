@@ -9,7 +9,7 @@ residuais e duplicatas) e o visual continuam em relatorio_gac/: o app só
 carrega os dados e chama gerar_relatorio.montar_relatorio().
 """
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -54,6 +54,33 @@ def _ler_justificativas() -> dict:
     return ler_justificativas()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _ler_historico() -> list[dict]:
+    from sheets_nc import ler_historico_em_tela
+    return ler_historico_em_tela()
+
+
+def _historico_com_fotografia_de_hoje(notas_credito) -> dict:
+    """Histórico {data: {NC: em tela}} da planilha. Na primeira geração do
+    dia, grava também a fotografia de hoje (uma por dia; as seguintes do
+    mesmo dia não regravam)."""
+    try:
+        historico = core.historico_de_linhas(_ler_historico())
+    except Exception as e:
+        st.warning(f"⚠️ Não foi possível ler o histórico do saldo em tela: {e}")
+        return {}
+    hoje = date.today()
+    if notas_credito and hoje not in historico:
+        from sheets_nc import registrar_fotografia_em_tela
+        foto = core.fotografia_em_tela(notas_credito)
+        try:
+            registrar_fotografia_em_tela(core.linhas_de_fotografia(hoje, foto))
+            _ler_historico.clear()
+        except Exception as e:
+            st.warning(f"⚠️ Não foi possível gravar a fotografia de hoje do saldo em tela: {e}")
+    return historico
+
+
 def page_relatorio_cmt():
     st.title("📑 Documento de Consulta ao Comandante")
     st.caption("Gerado a partir das planilhas de Controle de Crédito e de Empenhos/Liquidação.")
@@ -61,6 +88,7 @@ def page_relatorio_cmt():
     if st.button("🔄 Recarregar planilhas"):
         _ler_fontes.clear()
         _ler_justificativas.clear()
+        _ler_historico.clear()
 
     with st.spinner("Lendo planilhas…"):
         fontes = _ler_fontes()
@@ -80,8 +108,10 @@ def page_relatorio_cmt():
 
     justificativas = _secao_justificativas(notas_credito, notas_rp)
 
+    historico = _historico_com_fotografia_de_hoje(notas_credito)
+
     html = gerar_relatorio.montar_relatorio(
-        notas_credito, notas_corrente, notas_rp, [], justificativas,
+        notas_credito, notas_corrente, notas_rp, [], justificativas, historico=historico,
     )
     if not html:
         st.error("Nenhuma fonte de dados disponível — nada a gerar.")
