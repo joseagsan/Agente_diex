@@ -41,6 +41,9 @@ EMAIL_PASSWORD       = _s("EMAIL_PASSWORD", "")  # senha de app do Gmail
 SHEET_ID_NC_ORIGEM   = _s("SHEET_ID_NC_ORIGEM", "1PhxwM7BLauZQEYNyR7P-T2i2huwyGLaUAy3YVJpD-fs")
 ABAS_NC_ORIGEM       = [a.strip() for a in _s("ABAS_NC_ORIGEM", "160482,167482").split(",") if a.strip()]
 RESP_PADRAO          = _s("RESP_PADRAO", "10º GAC Sl")
+# Abas de empenhos da mesma planilha (uma por UG): cada linha liga uma NE à
+# NC que a lastreia — base do controle "Gestão de Recursos".
+ABAS_EMPENHOS_ORIGEM = [a.strip() for a in _s("ABAS_EMPENHOS_ORIGEM", "Empenhos 160,Empenhos 167").split(",") if a.strip()]
 
 # Planilha "Consolidado" — controle de liquidação/pagamento por NE (empenho),
 # com situação, valores por estágio e datas de envio ao fornecedor.
