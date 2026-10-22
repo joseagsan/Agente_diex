@@ -406,6 +406,7 @@ NAV_GRUPOS = [
         ("📊", "Dashboard", "dashboard"),
     ]),
     ("Créditos & Requisições", [
+        ("💰", "Gestão de Recursos", "gestao"),
         ("📋", "Notas de Crédito", "ncs"),
         ("📝", "Requisições",      "reqs"),
         ("📃", "Gerar REQ",        "gerar_req"),
@@ -571,7 +572,7 @@ def _sidebar(ncs, reqs) -> str:
         c1, c2 = st.columns(2)
         with c1:
             if st.button("🔄 Sync", use_container_width=True, help="Recarregar dados"):
-                carregar(forcar=True); st.rerun()
+                carregar(forcar=True); _empenhos_bda_cached.clear(); st.rerun()
         with c2:
             if st.button("🚪 Sair", use_container_width=True):
                 logout()
@@ -1107,6 +1108,185 @@ def page_ncs(ncs, reqs=None):
                 "Portal": st.column_config.LinkColumn("Portal", display_text="🔗 Ver"),
             },
         )
+
+
+# ── Gestão de Recursos (NCs x Empenhos da planilha da Bda) ─────────────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def _empenhos_bda_cached():
+    from sheets_nc import ler_empenhos_bda
+    return ler_empenhos_bda()
+
+
+def page_gestao_recursos(ncs):
+    import gestao_recursos as gr
+
+    t = _t()
+    st.title("💰 Gestão de Recursos")
+    st.caption(
+        f"{OM_PADRAO} · NCs das UG 160482/167482 cruzadas com as abas de empenhos da "
+        f"planilha de controle de crédito da 1ª Bda Inf Sl (somente leitura)."
+    )
+
+    try:
+        empenhos = _empenhos_bda_cached()
+    except Exception as e:
+        empenhos = []
+        st.warning(f"Não foi possível ler as abas de empenhos da Bda: {e}")
+
+    consolidado, orfas = gr.consolidar(ncs, empenhos)
+    if not consolidado:
+        st.info("Nenhuma NC do GAC encontrada na planilha da Bda.")
+        return
+
+    # ── Filtros ───────────────────────────────────────────────────────
+    with st.expander("🔍 Filtros", expanded=False):
+        f1, f2, f3, f4, f5 = st.columns(5)
+        f_ug  = f1.multiselect("UG",       sorted({n["ug"]    for n in consolidado if n["ug"]}),    key="gr_ug")
+        f_org = f2.multiselect("Órgão",    sorted({n["orgao"] for n in consolidado if n["orgao"]}), key="gr_org")
+        f_op  = f3.multiselect("Operação", sorted({n["op"]    for n in consolidado if n["op"]}),    key="gr_op")
+        f_nd  = f4.multiselect("ND",       sorted({n["nd"]    for n in consolidado if n["nd"]}),    key="gr_nd")
+        f_pi  = f5.multiselect("PI",       sorted({n["pi"]    for n in consolidado if n["pi"]}),    key="gr_pi")
+    filtro = {"ug": f_ug, "orgao": f_org, "op": f_op, "nd": f_nd, "pi": f_pi}
+    cons = [n for n in consolidado if all(not v or n[k] in v for k, v in filtro.items())]
+    if not cons:
+        st.info("Nenhuma NC com os filtros aplicados.")
+        return
+
+    tot = gr.totais(cons)
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1: _kpi_card("💰 Recebido", fmt(tot["recebido"]), f"{tot['qtd_ncs']} NCs", t["bar_recv"])
+    with k2: _kpi_card("↩️ Recolhido", fmt(tot["recolhido"]), f"Saldo NC {fmt(tot['saldo_nc'])}", "#94a3b8")
+    with k3: _kpi_card("📌 Empenhado", fmt(tot["empenhado"]), f"{tot['pct_exec']:.1f}% do saldo NC", t["bar_emp"])
+    with k4: _kpi_card("🕐 Em tela", fmt(tot["em_tela"]),
+                       f"{tot['qtd_com_saldo']} NC(s) com saldo relevante", "#fbbf24")
+    lista_alertas = gr.alertas(cons, orfas)
+    criticos = sum(1 for a in lista_alertas if a["nivel"] == "erro")
+    with k5: _kpi_card("⚠️ Alertas", str(len(lista_alertas)), f"{criticos} crítico(s)",
+                       "#ef4444" if criticos else "#fbbf24")
+
+    st.download_button(
+        "⬇️ Exportar Excel (NCs, empenhos, agrupamentos e alertas)",
+        data=gr.exportar_excel(cons, orfas),
+        file_name=f"gestao_recursos_gac_{date.today():%Y%m%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    tab_alerta, tab_saldo, tab_dist, tab_nc, tab_ne = st.tabs([
+        "⚠️ Alertas", "🕐 Saldo em tela", "📊 Distribuição", "🔎 Detalhe da NC", "💸 Empenhos",
+    ])
+
+    moeda = st.column_config.NumberColumn(format="R$ %.2f")
+
+    with tab_alerta:
+        cols = st.columns(len(gr.contagem_status(cons)))
+        for col, c in zip(cols, gr.contagem_status(cons)):
+            with col:
+                st.metric(c["status"], c["qtd"], fmt(c["em_tela"]), delta_color="off")
+        if not lista_alertas:
+            st.success("Nenhuma pendência: todo o crédito do GAC está empenhado ou dentro do prazo.")
+        for a in lista_alertas:
+            {"erro": st.error, "aviso": st.warning, "info": st.info}[a["nivel"]](
+                f"**{a['titulo']}**  \n{a['detalhe']}")
+
+    with tab_saldo:
+        abertas = gr.ncs_com_saldo(cons)
+        st.caption(
+            f"NCs com saldo em tela acima de {fmt(gr.RESIDUAL_VALOR_ABS_MAX)} "
+            f"(e de {gr.RESIDUAL_PERCENTUAL_MAX}% do recebido), mais urgentes primeiro — "
+            f"total {fmt(tot['em_tela_relevante'])}."
+        )
+        if not abertas:
+            st.success("Nenhuma NC com saldo relevante em tela.")
+        else:
+            df = gr.df_ncs(abertas)[["Status", "UG", "NC", "Órgão", "Operação", "ND", "PI", "Finalidade",
+                                     "Prazo", "Dias p/ prazo", "Saldo NC", "Empenhado", "Em tela", "% Exec",
+                                     "Doc recolhimento"]]
+            st.dataframe(df, use_container_width=True, hide_index=True, column_config={
+                "Saldo NC": moeda, "Empenhado": moeda, "Em tela": moeda,
+                "% Exec": st.column_config.ProgressColumn("% Exec", format="%.1f%%", min_value=0, max_value=100),
+            })
+            sel = st.selectbox("Gerar REQ para a NC", [n["nc"] for n in abertas], key="gr_req_nc")
+            if st.button("⚡ Gerar REQ a partir desta NC", key="gr_btn_req"):
+                st.session_state["gerar_nc_sel"] = sel
+                st.session_state["page"] = "gerar_req"
+                st.rerun()
+
+    with tab_dist:
+        dims = {"Operação": "op", "ND": "nd", "PI": "pi", "Órgão": "orgao", "Ação": "acao", "UG": "ug"}
+        dim = st.radio("Agrupar por", list(dims), horizontal=True, key="gr_dim")
+        df_g = gr.agrupar(cons, dims[dim]).rename(columns={
+            dims[dim]: dim, "recebido": "Recebido", "recolhido": "Recolhido", "saldo_nc": "Saldo NC",
+            "empenhado": "Empenhado", "em_tela": "Em tela", "pct_exec": "% Exec"})
+        top = df_g.sort_values("Saldo NC", ascending=False).head(15).iloc[::-1]
+        fig = go.Figure()
+        fig.add_bar(y=top[dim], x=top["Empenhado"], name="Empenhado", orientation="h",
+                    marker_color=t["bar_emp"], customdata=top["Empenhado"].apply(fmt),
+                    hovertemplate="<b>%{y}</b><br>Empenhado: %{customdata}<extra></extra>")
+        fig.add_bar(y=top[dim], x=top["Em tela"].clip(lower=0), name="Em tela", orientation="h",
+                    marker_color="#fbbf24", customdata=top["Em tela"].apply(fmt),
+                    hovertemplate="<b>%{y}</b><br>Em tela: %{customdata}<extra></extra>")
+        fig.update_layout(barmode="stack", height=max(280, len(top) * 32), **_cl())
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df_g, use_container_width=True, hide_index=True, column_config={
+            "Recebido": moeda, "Recolhido": moeda, "Saldo NC": moeda, "Empenhado": moeda, "Em tela": moeda,
+            "% Exec": st.column_config.ProgressColumn("% Exec", format="%.1f%%", min_value=0, max_value=100),
+        })
+
+    with tab_nc:
+        busca = st.text_input("Buscar NC", placeholder="🔍 número, finalidade, PI...", key="gr_busca")
+        opcoes = [n for n in cons if not busca or busca.lower() in
+                  f"{n['nc']} {n['finalidade']} {n['pi']} {n['op']}".lower()]
+        if not opcoes:
+            st.info("Nenhuma NC encontrada.")
+        else:
+            idx = st.selectbox("NC", range(len(opcoes)), key="gr_nc_sel",
+                               format_func=lambda i: f"{opcoes[i]['status'].split()[0]} {opcoes[i]['nc']} · "
+                                                     f"{opcoes[i]['finalidade'][:60]}")
+            n = opcoes[idx]
+            st.markdown(f"### {n['nc']} — {n['status']}")
+            st.markdown(
+                f"**UG** {n['ug']} · **Órgão** {n['orgao']} · **Ação** {n['acao']} · **ND** {n['nd']} · "
+                f"**PTRES** {n['ptres']} · **PI** {n['pi']} · **Operação** {n['op']}  \n"
+                f"**Finalidade:** {n['finalidade']}  \n"
+                f"**Data NC:** {n['data_nc'].strftime('%d/%m/%Y') if n['data_nc'] else '-'} · "
+                f"**Prazo:** {n['prazo'] or '-'}"
+                + (f" ({n['dias_prazo']} dia(s))" if n["dias_prazo"] is not None else "")
+                + (f"  \n**Recolhimento:** {n['doc_recolhimento']}" if n["doc_recolhimento"] else "")
+            )
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Recebido", fmt(n["recebido"]))
+            c2.metric("Recolhido", fmt(n["recolhido"]))
+            c3.metric("Saldo NC", fmt(n["saldo_nc"]))
+            c4.metric("Empenhado", fmt(n["empenhado"]), f"{n['pct_exec']:.1f}%", delta_color="off")
+            c5.metric("Em tela", fmt(n["em_tela"]))
+            if abs(n["divergencia"]) > gr.TOLERANCIA_CONCILIACAO:
+                st.warning(f"Soma das NEs vinculadas ({fmt(n['total_nes'])}) difere do empenhado da NC "
+                           f"em {fmt(n['divergencia'])}.")
+            if n["nes"]:
+                df_n = gr.df_empenhos([n], [])
+                df_n["Portal"] = [url_portal_transparencia(r["UG"], r["NE"]) for r in df_n.to_dict("records")]
+                st.dataframe(df_n, use_container_width=True, hide_index=True, column_config={
+                    "Valor": moeda, "Saldo NE": moeda,
+                    "Portal": st.column_config.LinkColumn("Portal", display_text="🔗 Ver"),
+                })
+            else:
+                st.caption("Nenhuma NE vinculada a esta NC nas abas de empenhos.")
+
+    with tab_ne:
+        df_e = gr.df_empenhos(cons, orfas if not any(filtro.values()) else [])
+        if df_e.empty:
+            st.info("Nenhum empenho encontrado.")
+        else:
+            e1, e2 = st.columns([3, 1])
+            busca_ne = e1.text_input("Buscar", placeholder="🔍 NE, NC, favorecido, finalidade...", key="gr_busca_ne")
+            if busca_ne:
+                df_e = df_e[df_e.apply(lambda r: busca_ne.lower() in " ".join(map(str, r.values)).lower(), axis=1)]
+            e2.metric("Total empenhado", fmt(df_e["Valor"].sum()), f"{df_e['NE'].nunique()} NE(s)", delta_color="off")
+            df_e = df_e.assign(Portal=[url_portal_transparencia(r["UG"], r["NE"]) for r in df_e.to_dict("records")])
+            st.dataframe(df_e, use_container_width=True, hide_index=True, column_config={
+                "Valor": moeda, "Saldo NE": moeda,
+                "Portal": st.column_config.LinkColumn("Portal", display_text="🔗 Ver"),
+            })
 
 
 # ── Cache para ler_reqs (evita 429 Quota exceeded) ────────────────────────────
@@ -3440,6 +3620,7 @@ def main():
     pagina = _sidebar(ncs, reqs)
 
     if   pagina == "dashboard":  page_dashboard(ncs, reqs)
+    elif pagina == "gestao":     page_gestao_recursos(ncs)
     elif pagina == "ncs":        page_ncs(ncs, reqs)
     elif pagina == "reqs":       page_reqs(reqs, ncs)
     elif pagina == "pdf":        page_pdf(ncs)
