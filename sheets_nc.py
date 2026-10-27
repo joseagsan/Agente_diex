@@ -17,7 +17,7 @@ from google.oauth2.service_account import Credentials
 
 from config import (
     SHEET_ID_NC, GOOGLE_CREDENTIALS_FILE, ABA_REQS, ABA_FORNECEDORES, DRIVE_FOLDER_ID,
-    SHEET_ID_NC_ORIGEM, ABAS_NC_ORIGEM, RESP_PADRAO,
+    SHEET_ID_NC_ORIGEM, ABAS_NC_ORIGEM, ABAS_EMPENHOS_ORIGEM, RESP_PADRAO,
     SHEET_ID_CONSOLIDADO, ABA_CONSOLIDADO,
     SHEET_ID_REQS_SALC, ABA_REQS_SALC, ABA_JUSTIFICATIVAS, ABA_HISTORICO_EM_TELA,
 )
@@ -32,6 +32,8 @@ SCOPES = [
 # Variantes de nome de coluna encontradas entre as abas de origem (UGs
 # diferentes às vezes divergem em acentuação) — normalizadas para um nome só.
 _ALIAS_COLUNAS_NC = {"ÓRGÃO": "ORGÃO"}
+# Abas "Empenhos 160/167" divergem nos cabeçalhos ("N C" x "NC", "N D" x "ND").
+_ALIAS_COLUNAS_EMP = {"N C": "NC", "N D": "ND", "N E": "NE", "ÓRGÃO": "ORGAO", "ORGÃO": "ORGAO"}
 
 COLUNAS_REQ = [
     "REQ", "NE", "DATA REQ", "NC", "PI", "FINALIDADE", "TIPO",
@@ -168,6 +170,34 @@ def ler_ncs() -> list[dict]:
             resultado.append(r)
 
     logger.info("%d NCs lidas (RESP=%s) das abas %s.", len(resultado), RESP_PADRAO, ABAS_NC_ORIGEM)
+    return resultado
+
+
+def ler_empenhos_bda() -> list[dict]:
+    """Lê as abas de empenhos da planilha de controle de crédito da Bda
+    (ABAS_EMPENHOS_ORIGEM, somente leitura), filtradas por RESP = RESP_PADRAO.
+    Cada linha traz a NE e a NC que a lastreia, com o valor da NE naquela NC."""
+    client = _conectar()
+    planilha = client.open_by_key(SHEET_ID_NC_ORIGEM)
+    resp_alvo = _normaliza_texto(RESP_PADRAO)
+
+    resultado = []
+    for aba in ABAS_EMPENHOS_ORIGEM:
+        try:
+            ws = planilha.worksheet(aba)
+        except Exception as e:
+            logger.warning("Aba de empenhos '%s' não encontrada: %s", aba, e)
+            continue
+        for r in _ws_para_dicts(ws):
+            r = {_ALIAS_COLUNAS_EMP.get(k.strip(), k.strip()): v for k, v in r.items()}
+            if not r.get("NE"):
+                continue
+            if _normaliza_texto(r.get("RESP", "")) != resp_alvo:
+                continue
+            r["_ABA_ORIGEM"] = aba
+            resultado.append(r)
+
+    logger.info("%d empenhos lidos (RESP=%s) das abas %s.", len(resultado), RESP_PADRAO, ABAS_EMPENHOS_ORIGEM)
     return resultado
 
 

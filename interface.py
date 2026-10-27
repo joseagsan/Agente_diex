@@ -406,10 +406,13 @@ NAV_GRUPOS = [
         ("📊", "Dashboard", "dashboard"),
     ]),
     ("Créditos & Requisições", [
+        ("💰", "Gestão de Recursos", "gestao"),
         ("📋", "Notas de Crédito", "ncs"),
         ("📝", "Requisições",      "reqs"),
         ("📃", "Gerar REQ",        "gerar_req"),
         ("🤝", "Carona",           "carona"),
+        ("📑", "Atas",             "atas"),
+        ("🔎", "Buscar Item",      "buscar_item"),
     ]),
     ("Dados & Documentos", [
         ("📥", "Importar Dados",   "importar"),
@@ -569,7 +572,7 @@ def _sidebar(ncs, reqs) -> str:
         c1, c2 = st.columns(2)
         with c1:
             if st.button("🔄 Sync", use_container_width=True, help="Recarregar dados"):
-                carregar(forcar=True); st.rerun()
+                carregar(forcar=True); _empenhos_bda_cached.clear(); st.rerun()
         with c2:
             if st.button("🚪 Sair", use_container_width=True):
                 logout()
@@ -1105,6 +1108,185 @@ def page_ncs(ncs, reqs=None):
                 "Portal": st.column_config.LinkColumn("Portal", display_text="🔗 Ver"),
             },
         )
+
+
+# ── Gestão de Recursos (NCs x Empenhos da planilha da Bda) ─────────────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def _empenhos_bda_cached():
+    from sheets_nc import ler_empenhos_bda
+    return ler_empenhos_bda()
+
+
+def page_gestao_recursos(ncs):
+    import gestao_recursos as gr
+
+    t = _t()
+    st.title("💰 Gestão de Recursos")
+    st.caption(
+        f"{OM_PADRAO} · NCs das UG 160482/167482 cruzadas com as abas de empenhos da "
+        f"planilha de controle de crédito da 1ª Bda Inf Sl (somente leitura)."
+    )
+
+    try:
+        empenhos = _empenhos_bda_cached()
+    except Exception as e:
+        empenhos = []
+        st.warning(f"Não foi possível ler as abas de empenhos da Bda: {e}")
+
+    consolidado, orfas = gr.consolidar(ncs, empenhos)
+    if not consolidado:
+        st.info("Nenhuma NC do GAC encontrada na planilha da Bda.")
+        return
+
+    # ── Filtros ───────────────────────────────────────────────────────
+    with st.expander("🔍 Filtros", expanded=False):
+        f1, f2, f3, f4, f5 = st.columns(5)
+        f_ug  = f1.multiselect("UG",       sorted({n["ug"]    for n in consolidado if n["ug"]}),    key="gr_ug")
+        f_org = f2.multiselect("Órgão",    sorted({n["orgao"] for n in consolidado if n["orgao"]}), key="gr_org")
+        f_op  = f3.multiselect("Operação", sorted({n["op"]    for n in consolidado if n["op"]}),    key="gr_op")
+        f_nd  = f4.multiselect("ND",       sorted({n["nd"]    for n in consolidado if n["nd"]}),    key="gr_nd")
+        f_pi  = f5.multiselect("PI",       sorted({n["pi"]    for n in consolidado if n["pi"]}),    key="gr_pi")
+    filtro = {"ug": f_ug, "orgao": f_org, "op": f_op, "nd": f_nd, "pi": f_pi}
+    cons = [n for n in consolidado if all(not v or n[k] in v for k, v in filtro.items())]
+    if not cons:
+        st.info("Nenhuma NC com os filtros aplicados.")
+        return
+
+    tot = gr.totais(cons)
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1: _kpi_card("💰 Recebido", fmt(tot["recebido"]), f"{tot['qtd_ncs']} NCs", t["bar_recv"])
+    with k2: _kpi_card("↩️ Recolhido", fmt(tot["recolhido"]), f"Saldo NC {fmt(tot['saldo_nc'])}", "#94a3b8")
+    with k3: _kpi_card("📌 Empenhado", fmt(tot["empenhado"]), f"{tot['pct_exec']:.1f}% do saldo NC", t["bar_emp"])
+    with k4: _kpi_card("🕐 Em tela", fmt(tot["em_tela"]),
+                       f"{tot['qtd_com_saldo']} NC(s) com saldo relevante", "#fbbf24")
+    lista_alertas = gr.alertas(cons, orfas)
+    criticos = sum(1 for a in lista_alertas if a["nivel"] == "erro")
+    with k5: _kpi_card("⚠️ Alertas", str(len(lista_alertas)), f"{criticos} crítico(s)",
+                       "#ef4444" if criticos else "#fbbf24")
+
+    st.download_button(
+        "⬇️ Exportar Excel (NCs, empenhos, agrupamentos e alertas)",
+        data=gr.exportar_excel(cons, orfas),
+        file_name=f"gestao_recursos_gac_{date.today():%Y%m%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    tab_alerta, tab_saldo, tab_dist, tab_nc, tab_ne = st.tabs([
+        "⚠️ Alertas", "🕐 Saldo em tela", "📊 Distribuição", "🔎 Detalhe da NC", "💸 Empenhos",
+    ])
+
+    moeda = st.column_config.NumberColumn(format="R$ %.2f")
+
+    with tab_alerta:
+        cols = st.columns(len(gr.contagem_status(cons)))
+        for col, c in zip(cols, gr.contagem_status(cons)):
+            with col:
+                st.metric(c["status"], c["qtd"], fmt(c["em_tela"]), delta_color="off")
+        if not lista_alertas:
+            st.success("Nenhuma pendência: todo o crédito do GAC está empenhado ou dentro do prazo.")
+        for a in lista_alertas:
+            {"erro": st.error, "aviso": st.warning, "info": st.info}[a["nivel"]](
+                f"**{a['titulo']}**  \n{a['detalhe']}")
+
+    with tab_saldo:
+        abertas = gr.ncs_com_saldo(cons)
+        st.caption(
+            f"NCs com saldo em tela acima de {fmt(gr.RESIDUAL_VALOR_ABS_MAX)} "
+            f"(e de {gr.RESIDUAL_PERCENTUAL_MAX}% do recebido), mais urgentes primeiro — "
+            f"total {fmt(tot['em_tela_relevante'])}."
+        )
+        if not abertas:
+            st.success("Nenhuma NC com saldo relevante em tela.")
+        else:
+            df = gr.df_ncs(abertas)[["Status", "UG", "NC", "Órgão", "Operação", "ND", "PI", "Finalidade",
+                                     "Prazo", "Dias p/ prazo", "Saldo NC", "Empenhado", "Em tela", "% Exec",
+                                     "Doc recolhimento"]]
+            st.dataframe(df, use_container_width=True, hide_index=True, column_config={
+                "Saldo NC": moeda, "Empenhado": moeda, "Em tela": moeda,
+                "% Exec": st.column_config.ProgressColumn("% Exec", format="%.1f%%", min_value=0, max_value=100),
+            })
+            sel = st.selectbox("Gerar REQ para a NC", [n["nc"] for n in abertas], key="gr_req_nc")
+            if st.button("⚡ Gerar REQ a partir desta NC", key="gr_btn_req"):
+                st.session_state["gerar_nc_sel"] = sel
+                st.session_state["page"] = "gerar_req"
+                st.rerun()
+
+    with tab_dist:
+        dims = {"Operação": "op", "ND": "nd", "PI": "pi", "Órgão": "orgao", "Ação": "acao", "UG": "ug"}
+        dim = st.radio("Agrupar por", list(dims), horizontal=True, key="gr_dim")
+        df_g = gr.agrupar(cons, dims[dim]).rename(columns={
+            dims[dim]: dim, "recebido": "Recebido", "recolhido": "Recolhido", "saldo_nc": "Saldo NC",
+            "empenhado": "Empenhado", "em_tela": "Em tela", "pct_exec": "% Exec"})
+        top = df_g.sort_values("Saldo NC", ascending=False).head(15).iloc[::-1]
+        fig = go.Figure()
+        fig.add_bar(y=top[dim], x=top["Empenhado"], name="Empenhado", orientation="h",
+                    marker_color=t["bar_emp"], customdata=top["Empenhado"].apply(fmt),
+                    hovertemplate="<b>%{y}</b><br>Empenhado: %{customdata}<extra></extra>")
+        fig.add_bar(y=top[dim], x=top["Em tela"].clip(lower=0), name="Em tela", orientation="h",
+                    marker_color="#fbbf24", customdata=top["Em tela"].apply(fmt),
+                    hovertemplate="<b>%{y}</b><br>Em tela: %{customdata}<extra></extra>")
+        fig.update_layout(barmode="stack", height=max(280, len(top) * 32), **_cl())
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df_g, use_container_width=True, hide_index=True, column_config={
+            "Recebido": moeda, "Recolhido": moeda, "Saldo NC": moeda, "Empenhado": moeda, "Em tela": moeda,
+            "% Exec": st.column_config.ProgressColumn("% Exec", format="%.1f%%", min_value=0, max_value=100),
+        })
+
+    with tab_nc:
+        busca = st.text_input("Buscar NC", placeholder="🔍 número, finalidade, PI...", key="gr_busca")
+        opcoes = [n for n in cons if not busca or busca.lower() in
+                  f"{n['nc']} {n['finalidade']} {n['pi']} {n['op']}".lower()]
+        if not opcoes:
+            st.info("Nenhuma NC encontrada.")
+        else:
+            idx = st.selectbox("NC", range(len(opcoes)), key="gr_nc_sel",
+                               format_func=lambda i: f"{opcoes[i]['status'].split()[0]} {opcoes[i]['nc']} · "
+                                                     f"{opcoes[i]['finalidade'][:60]}")
+            n = opcoes[idx]
+            st.markdown(f"### {n['nc']} — {n['status']}")
+            st.markdown(
+                f"**UG** {n['ug']} · **Órgão** {n['orgao']} · **Ação** {n['acao']} · **ND** {n['nd']} · "
+                f"**PTRES** {n['ptres']} · **PI** {n['pi']} · **Operação** {n['op']}  \n"
+                f"**Finalidade:** {n['finalidade']}  \n"
+                f"**Data NC:** {n['data_nc'].strftime('%d/%m/%Y') if n['data_nc'] else '-'} · "
+                f"**Prazo:** {n['prazo'] or '-'}"
+                + (f" ({n['dias_prazo']} dia(s))" if n["dias_prazo"] is not None else "")
+                + (f"  \n**Recolhimento:** {n['doc_recolhimento']}" if n["doc_recolhimento"] else "")
+            )
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Recebido", fmt(n["recebido"]))
+            c2.metric("Recolhido", fmt(n["recolhido"]))
+            c3.metric("Saldo NC", fmt(n["saldo_nc"]))
+            c4.metric("Empenhado", fmt(n["empenhado"]), f"{n['pct_exec']:.1f}%", delta_color="off")
+            c5.metric("Em tela", fmt(n["em_tela"]))
+            if abs(n["divergencia"]) > gr.TOLERANCIA_CONCILIACAO:
+                st.warning(f"Soma das NEs vinculadas ({fmt(n['total_nes'])}) difere do empenhado da NC "
+                           f"em {fmt(n['divergencia'])}.")
+            if n["nes"]:
+                df_n = gr.df_empenhos([n], [])
+                df_n["Portal"] = [url_portal_transparencia(r["UG"], r["NE"]) for r in df_n.to_dict("records")]
+                st.dataframe(df_n, use_container_width=True, hide_index=True, column_config={
+                    "Valor": moeda, "Saldo NE": moeda,
+                    "Portal": st.column_config.LinkColumn("Portal", display_text="🔗 Ver"),
+                })
+            else:
+                st.caption("Nenhuma NE vinculada a esta NC nas abas de empenhos.")
+
+    with tab_ne:
+        df_e = gr.df_empenhos(cons, orfas if not any(filtro.values()) else [])
+        if df_e.empty:
+            st.info("Nenhum empenho encontrado.")
+        else:
+            e1, e2 = st.columns([3, 1])
+            busca_ne = e1.text_input("Buscar", placeholder="🔍 NE, NC, favorecido, finalidade...", key="gr_busca_ne")
+            if busca_ne:
+                df_e = df_e[df_e.apply(lambda r: busca_ne.lower() in " ".join(map(str, r.values)).lower(), axis=1)]
+            e2.metric("Total empenhado", fmt(df_e["Valor"].sum()), f"{df_e['NE'].nunique()} NE(s)", delta_color="off")
+            df_e = df_e.assign(Portal=[url_portal_transparencia(r["UG"], r["NE"]) for r in df_e.to_dict("records")])
+            st.dataframe(df_e, use_container_width=True, hide_index=True, column_config={
+                "Valor": moeda, "Saldo NE": moeda,
+                "Portal": st.column_config.LinkColumn("Portal", display_text="🔗 Ver"),
+            })
 
 
 # ── Cache para ler_reqs (evita 429 Quota exceeded) ────────────────────────────
@@ -2870,6 +3052,510 @@ def page_carona(ncs):
         st.code(texto_forn, language=None)
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _arps_vencendo_cached(codigo_ug: str, data_min: str, data_max: str):
+    from arp_api import consultar_arps_vencendo
+    return consultar_arps_vencendo(codigo_ug, data_min, data_max)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _ugs_monitoradas_cached():
+    from ugs_monitoradas import ler_ugs_monitoradas
+    return ler_ugs_monitoradas()
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _itens_arp_cached(codigo_ug: str, data_vig_inicial: str):
+    from arp_api import consultar_itens_arp
+    return consultar_itens_arp(codigo_ug, data_vig_inicial, data_vig_inicial)
+
+
+def page_atas():
+    st.title("📑 Atas de Registro de Preço")
+    st.caption(
+        "Acompanha atas das UGs que você escolher — vigência, itens e saldo, via API pública do "
+        "compras.gov.br (sem certificado digital, sem robô)."
+    )
+
+    from ugs_monitoradas import adicionar_ug, remover_ug
+
+    st.subheader("1. UGs monitoradas")
+    with st.form("f_add_ug", clear_on_submit=True):
+        c1, c2, c3 = st.columns([1, 2, 1])
+        nova_ug   = c1.text_input("UASG", placeholder="ex: 1110794")
+        novo_nome = c2.text_input("Nome (opcional)", placeholder="ex: SECAAE")
+        add_ug    = c3.form_submit_button("➕ Adicionar", use_container_width=True)
+
+    if add_ug:
+        if nova_ug.strip():
+            try:
+                adicionar_ug(nova_ug.strip(), novo_nome.strip())
+                _ugs_monitoradas_cached.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao adicionar: {e}")
+        else:
+            st.warning("Informe a UASG.")
+
+    try:
+        ugs = _ugs_monitoradas_cached()
+    except Exception as e:
+        ugs = []
+        st.error(f"Erro ao carregar UGs monitoradas: {e}")
+
+    if not ugs:
+        st.info("Nenhuma UG monitorada ainda. Adicione a UASG gerenciadora de uma ata que você "
+                "acompanha (ex: 1110794 - SECAAE).")
+        return
+
+    cols = st.columns(min(len(ugs), 4))
+    for i, ug in enumerate(ugs):
+        with cols[i % len(cols)]:
+            nome = f" · {ug['NOME']}" if ug.get("NOME") else ""
+            st.markdown(f"**{ug['UG']}**{nome}")
+            if st.button("🗑️ Remover", key=f"rm_ug_{ug['UG']}", use_container_width=True):
+                remover_ug(ug["UG"])
+                _ugs_monitoradas_cached.clear()
+                st.rerun()
+
+    # ── Busca as atas vigentes e os itens de cada uma (camada base) ──────
+    st.divider()
+    dias_janela = st.slider("Vigência final dentro de quantos dias?", 7, 365, 90, key="atas_dias")
+
+    from datetime import date, timedelta
+    hoje     = date.today()
+    data_min = hoje.strftime("%Y-%m-%d")
+    data_max = (hoje + timedelta(days=dias_janela)).strftime("%Y-%m-%d")
+
+    todas_atas = []
+    for ug in ugs:
+        try:
+            atas = _arps_vencendo_cached(ug["UG"], data_min, data_max)
+            todas_atas.extend(atas)
+        except Exception as e:
+            st.error(f"Erro ao consultar UG {ug['UG']}: {e}")
+
+    if not todas_atas:
+        st.info("Nenhuma ata vigente encontrada nesse período para as UGs monitoradas.")
+        return
+
+    pregoes       = {}  # numero_compra -> {"modalidade": str, "atas": [...]}
+    itens_por_ata = {}  # numero_ata -> [itens]
+
+    with st.spinner("Localizando o pregão e os itens de cada ata..."):
+        for a in todas_atas:
+            venc = a.get("dataVigenciaFinal", "")
+            dias_restantes = None
+            try:
+                dias_restantes = (datetime.strptime(venc, "%Y-%m-%d").date() - hoje).days
+            except Exception:
+                pass
+            badge = "⚪"
+            if dias_restantes is not None:
+                badge = "🔴" if dias_restantes < 0 else "🟠" if dias_restantes <= 15 else "🟡" if dias_restantes <= 30 else "🟢"
+
+            numero_ata  = a.get("numeroAtaRegistroPreco", "")
+            codigo_ug   = a.get("codigoUnidadeGerenciadora", "")
+            vig_inicial = a.get("dataVigenciaInicial", "")
+
+            itens_data = []
+            if codigo_ug and vig_inicial:
+                try:
+                    itens_data = _itens_arp_cached(codigo_ug, vig_inicial)
+                except Exception:
+                    itens_data = []
+
+            itens_desta_ata = [it for it in itens_data if it.get("numeroAtaRegistroPreco") == numero_ata]
+            itens_por_ata[numero_ata] = itens_desta_ata
+
+            numero_compra = itens_desta_ata[0].get("numeroCompra", "") if itens_desta_ata else ""
+            modalidade = (itens_desta_ata[0].get("nomeModalidadeCompra", "") if itens_desta_ata
+                          else a.get("nomeModalidadeCompra", ""))
+            chave_pregao = numero_compra or "— sem pregão identificado —"
+
+            pregoes.setdefault(chave_pregao, {"modalidade": modalidade, "atas": []})
+            pregoes[chave_pregao]["atas"].append({
+                "numero_ata": numero_ata, "ug": codigo_ug,
+                "orgao": a.get("nomeUnidadeGerenciadora", ""),
+                "vigencia_final": venc, "dias_restantes": dias_restantes,
+                "situacao": a.get("situacao", ""), "badge": badge,
+            })
+
+    # ── 2. Pregões ─────────────────────────────────────────────────────
+    st.subheader("2. Pregões")
+    linhas_pregao = []
+    for pregao, info in pregoes.items():
+        dias_vals = [a["dias_restantes"] for a in info["atas"] if a["dias_restantes"] is not None]
+        linhas_pregao.append({
+            "Pregão":           pregao,
+            "Modalidade":       info["modalidade"],
+            "Qtd. Atas":        len(info["atas"]),
+            "Próx. Vencimento": min(dias_vals) if dias_vals else None,
+        })
+    df_pregoes = pd.DataFrame(linhas_pregao).sort_values(
+        "Próx. Vencimento", key=lambda s: pd.to_numeric(s, errors="coerce"))
+    df_pregoes["Próx. Vencimento"] = df_pregoes["Próx. Vencimento"].apply(
+        lambda v: v if pd.notna(v) else "—")
+
+    st.caption("Clique num pregão para ver as atas dele.")
+    evt_pregao = st.dataframe(
+        df_pregoes, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row", key="atas_pregao_table",
+    )
+    sel_pregao_rows = evt_pregao.selection.rows if (evt_pregao and hasattr(evt_pregao, "selection")) else []
+    pregao_selecionado = df_pregoes.iloc[sel_pregao_rows[0]]["Pregão"] if sel_pregao_rows else None
+
+    if not pregao_selecionado:
+        return
+
+    # ── 3. Atas do pregão selecionado ────────────────────────────────────
+    st.divider()
+    st.subheader(f"3. Atas do pregão {pregao_selecionado}")
+    atas_do_pregao = pregoes[pregao_selecionado]["atas"]
+    df_atas = pd.DataFrame([{
+        " ":              a["badge"],
+        "Ata":            a["numero_ata"],
+        "UG":             a["ug"],
+        "Órgão":          a["orgao"],
+        "Vigência Final": a["vigencia_final"],
+        "Dias restantes": a["dias_restantes"] if a["dias_restantes"] is not None else "—",
+        "Situação":       a["situacao"],
+    } for a in atas_do_pregao]).sort_values("Dias restantes", key=lambda s: pd.to_numeric(s, errors="coerce"))
+
+    st.caption("Clique numa ata para ver os itens dela.")
+    evt_ata = st.dataframe(
+        df_atas, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row", key=f"atas_table_{pregao_selecionado}",
+    )
+    sel_ata_rows = evt_ata.selection.rows if (evt_ata and hasattr(evt_ata, "selection")) else []
+    ata_selecionada = df_atas.iloc[sel_ata_rows[0]]["Ata"] if sel_ata_rows else None
+
+    if not ata_selecionada:
+        return
+
+    # ── 4. Itens da ata selecionada ───────────────────────────────────────
+    st.divider()
+    st.subheader(f"4. Itens da ata {ata_selecionada}")
+    itens = itens_por_ata.get(ata_selecionada, [])
+    ug_da_ata = next((a["ug"] for a in atas_do_pregao if a["numero_ata"] == ata_selecionada), "")
+
+    if not itens:
+        st.info("Nenhum item encontrado para essa ata.")
+        return
+
+    for it in itens:
+        numero_item = it.get("numeroItem", "")
+        desc = it.get("descricaoItem", "") or it.get("descricaoDetalhada", "")
+        with st.expander(f"Item {numero_item} — {desc[:70]}"):
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Qtd. Registrada", it.get("quantidadeRegistrada", "—"))
+            k2.metric("Valor Unitário",  it.get("valorUnitario", "—"))
+            k3.metric("Unidade",         it.get("unidadeMedida", "—"))
+            st.caption(f"Fornecedor: {it.get('nomeRazaoSocialFornecedor','—')} · {it.get('niFornecedor','—')}")
+
+            if st.button("🔍 Consultar saldo/adesão", key=f"saldo_{ata_selecionada}_{numero_item}"):
+                from arp_api import consultar_saldo_item, consultar_adesao_item
+                try:
+                    saldo  = consultar_saldo_item(ata_selecionada, ug_da_ata, numero_item)
+                    adesao = consultar_adesao_item(ata_selecionada, ug_da_ata, numero_item)
+                except Exception as e:
+                    st.error(f"Erro ao consultar a API: {e}")
+                else:
+                    if saldo:
+                        s = saldo[0]
+                        sk1, sk2, sk3 = st.columns(3)
+                        sk1.metric("Qtd. Registrada", s.get("quantidadeRegistrada", "—"))
+                        sk2.metric("Qtd. Empenhada",  s.get("quantidadeEmpenhada", "—"))
+                        sk3.metric("Saldo",           s.get("saldoEmpenho", "—"))
+                    else:
+                        st.info("Nenhum empenho registrado ainda para esse item.")
+
+                    if adesao:
+                        ad = adesao[0]
+                        aceita = "✅ Sim" if ad.get("aceitaAdesao") else "❌ Não"
+                        st.write(
+                            f"**Aceita adesão (carona):** {aceita}  ·  "
+                            f"**Saldo para adesão:** {ad.get('saldoAdesoes', '—')}"
+                        )
+                    else:
+                        st.info("Sem informação de adesão para esse item.")
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _uasgs_busca_cached():
+    from uasgs_busca import ler_uasgs_busca
+    return ler_uasgs_busca()
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _itens_uasg_busca_cached(codigo_ug: str):
+    """Todos os itens vigentes de uma UASG, sem filtro de palavra-chave —
+    cacheado uma vez por UASG e reaproveitado por todas as buscas, para que
+    pesquisar vários itens de uma vez não refaça a mesma chamada à API."""
+    from busca_item import listar_itens_vigentes_por_uasg
+    return listar_itens_vigentes_por_uasg(codigo_ug)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _unidades_item_cached(numero_ata: str, ug_gerenciadora: str, numero_item: str):
+    from arp_api import consultar_adesao_item
+    return consultar_adesao_item(numero_ata, ug_gerenciadora, numero_item)
+
+
+_ROTULOS_PRIORIDADE = {
+    1: "Prioridade 1 — Boa Vista (nossas UASGs)",
+    2: "Prioridade 2 — Boa Vista (outros órgãos)",
+    3: "Prioridade 3 — Manaus (Exército)",
+    4: "Prioridade 4 — Manaus (demais órgãos)",
+}
+
+
+def _valor_unitario_float(item: dict) -> float:
+    try:
+        return float(str(item.get("valorUnitario", "0")).replace(",", "."))
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _renderizar_candidato(c: dict, cobre: str):
+    item, ata = c["item"], c["ata"]
+    desc  = item.get("descricaoItem", "") or item.get("descricaoDetalhada", "")
+    valor = _valor_unitario_float(item)
+    with st.container(border=True):
+        st.markdown(f"**{desc}**")
+        l1, l2, l3 = st.columns(3)
+        l1.metric("Situação", c["situacao"])
+        l2.metric("Qtd. utilizável", f"{c['quantidade_utilizavel']:.0f}")
+        l3.metric("Cobre a necessidade?", cobre)
+        st.caption(
+            f"Ata {item.get('numeroAtaRegistroPreco','—')} · Compra {item.get('numeroCompra','—')} · "
+            f"Gerenciadora {ata.get('nomeUnidadeGerenciadora','—')} ({ata.get('codigoUnidadeGerenciadora','—')}) · "
+            f"Fornecedor {item.get('nomeRazaoSocialFornecedor','—')} · Valor unit. R$ {valor:.2f} · "
+            f"Vigência até {ata.get('dataVigenciaFinal','—')} · {_ROTULOS_PRIORIDADE.get(c.get('_prioridade'), '')}"
+        )
+        st.caption(f"Origem da quantidade: {c['origem_quantidade'] or '—'}")
+        if c["situacao"] == "CARONA" and c.get("aceita_adesao") is not None:
+            st.caption(f"Aceita adesão: {'Sim' if c['aceita_adesao'] else 'Não'}")
+
+
+def _executar_busca_cascata(palavra_chave: str, quantidade_necessaria: float, por_prioridade: dict):
+    """Busca um item em cascata pelas prioridades 1→4 (pula as sem UASG
+    cadastrada) e para assim que uma prioridade render opção(ões) que
+    cobrem a quantidade necessária por inteiro."""
+    from busca_item import classificar_item, filtrar_por_palavra_chave
+
+    resultado_final    = None
+    parciais_coletados = []
+    tentadas           = []
+
+    for p in (1, 2, 3, 4):
+        lista_uasgs = por_prioridade.get(p, [])
+        if not lista_uasgs:
+            continue
+        tentadas.append(p)
+        candidatos = []
+
+        for u in lista_uasgs:
+            try:
+                todos_itens = _itens_uasg_busca_cached(u["UASG"])
+            except Exception as e:
+                st.error(f"Erro ao consultar UASG {u['UASG']}: {e}")
+                continue
+            itens = filtrar_por_palavra_chave(todos_itens, palavra_chave)
+            for item in itens:
+                ata = item["_ata"]
+                try:
+                    unidades = _unidades_item_cached(
+                        item.get("numeroAtaRegistroPreco", ""),
+                        ata.get("codigoUnidadeGerenciadora", ""),
+                        item.get("numeroItem", ""),
+                    )
+                except Exception:
+                    unidades = []
+                classificado = classificar_item(item, unidades, UG_PADRAO)
+                classificado["_prioridade"] = p
+                candidatos.append(classificado)
+
+        atendem = [c for c in candidatos
+                   if c["situacao"] != "SEM_OPCAO" and c["quantidade_utilizavel"] >= quantidade_necessaria]
+        parciais = [c for c in candidatos
+                    if c["situacao"] != "SEM_OPCAO" and c["quantidade_utilizavel"] < quantidade_necessaria]
+        parciais_coletados.extend(parciais)
+
+        if atendem:
+            atendem.sort(key=lambda c: _valor_unitario_float(c["item"]))
+            resultado_final = {"prioridade": p, "atendem": atendem, "parciais": parciais}
+            break
+
+    return resultado_final, parciais_coletados, tentadas
+
+
+def _renderizar_resultado_busca(palavra_chave: str, resultado_final, parciais_coletados, tentadas):
+    if resultado_final:
+        st.success(
+            f"Achamos {len(resultado_final['atendem'])} opção(ões) que atendem na "
+            f"{_ROTULOS_PRIORIDADE[resultado_final['prioridade']]}."
+        )
+        for c in resultado_final["atendem"]:
+            _renderizar_candidato(c, cobre="✅ Sim")
+        if resultado_final["parciais"]:
+            with st.expander(
+                f"Outras opções na mesma prioridade (não cobrem sozinhas) — {len(resultado_final['parciais'])}"
+            ):
+                for c in resultado_final["parciais"]:
+                    _renderizar_candidato(c, cobre="◐ Parcial")
+    elif parciais_coletados:
+        st.warning(
+            "Nenhuma opção cobre a quantidade necessária por inteiro em nenhuma prioridade "
+            "cadastrada. Seguem as opções parciais encontradas, como reserva:"
+        )
+        parciais_coletados.sort(key=lambda c: -c["quantidade_utilizavel"])
+        for c in parciais_coletados:
+            _renderizar_candidato(c, cobre="◐ Parcial")
+    else:
+        rotulos_tentadas = ", ".join(_ROTULOS_PRIORIDADE[p] for p in tentadas)
+        st.info(f"Nenhum item com '{palavra_chave}' na descrição foi encontrado ({rotulos_tentadas}).")
+
+
+def page_buscar_item():
+    st.title("🔎 Buscar Item em Atas")
+    st.caption(
+        "Procura um item por palavra-chave nas atas vigentes das suas UASGs, em ordem de "
+        "prioridade, e já calcula se dá pra empenhar direto ou só por carona (50% da "
+        "quantidade registrada da gerenciadora)."
+    )
+    st.info(
+        "A API pública não permite varrer 'todas as UASGs de uma cidade' — só buscar por "
+        "UASG específica. Por isso, fora da Prioridade 1 (já vem pronta), cadastre aqui as "
+        "UASGs que você quer que entrem na busca (ex: unidades do Exército em Manaus).",
+        icon="ℹ️",
+    )
+
+    from uasgs_busca import adicionar_uasg_busca, remover_uasg_busca
+
+    st.subheader("1. UASGs por prioridade")
+    with st.form("f_add_uasg_busca", clear_on_submit=True):
+        c1, c2, c3, c4 = st.columns([1, 2, 1, 1])
+        nova_uasg = c1.text_input("UASG", placeholder="ex: 160907")
+        novo_nome = c2.text_input("Nome (opcional)", placeholder="ex: 1º BLog")
+        nova_prio = c3.selectbox("Prioridade", [1, 2, 3, 4], index=0)
+        add_uasg  = c4.form_submit_button("➕ Adicionar", use_container_width=True)
+
+    if add_uasg:
+        if nova_uasg.strip():
+            try:
+                adicionar_uasg_busca(nova_uasg.strip(), novo_nome.strip(), nova_prio)
+                _uasgs_busca_cached.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao adicionar: {e}")
+        else:
+            st.warning("Informe a UASG.")
+
+    try:
+        uasgs = _uasgs_busca_cached()
+    except Exception as e:
+        uasgs = []
+        st.error(f"Erro ao carregar UASGs: {e}")
+
+    por_prioridade: dict = {1: [], 2: [], 3: [], 4: []}
+    for u in uasgs:
+        try:
+            p = int(u.get("PRIORIDADE", 1) or 1)
+        except ValueError:
+            p = 1
+        por_prioridade.setdefault(p, []).append(u)
+
+    for p in (1, 2, 3, 4):
+        lista = por_prioridade.get(p, [])
+        with st.expander(f"{_ROTULOS_PRIORIDADE[p]} — {len(lista)} UASG(s)", expanded=(p == 1)):
+            if not lista:
+                st.caption("Nenhuma UASG cadastrada nessa prioridade ainda.")
+            for u in lista:
+                cc1, cc2 = st.columns([5, 1])
+                nome = f" · {u['NOME']}" if u.get("NOME") else ""
+                cc1.markdown(f"**{u['UASG']}**{nome}")
+                if cc2.button("🗑️", key=f"rm_uasg_busca_{u['UASG']}"):
+                    remover_uasg_busca(u["UASG"])
+                    _uasgs_busca_cached.clear()
+                    st.rerun()
+
+    if not uasgs:
+        return
+
+    st.divider()
+    st.subheader("2. O que você precisa?")
+    st.caption("Monte a lista — dá pra buscar vários itens de uma vez.")
+
+    if "busca_lista_itens" not in st.session_state:
+        st.session_state["busca_lista_itens"] = []
+    lista_itens = st.session_state["busca_lista_itens"]
+
+    with st.form("f_add_item_busca", clear_on_submit=True):
+        bc1, bc2, bc3 = st.columns([3, 1, 1])
+        nova_palavra = bc1.text_input("Palavra-chave", placeholder="ex: HDMI, motosserra, pneu")
+        nova_qtd     = bc2.number_input("Quantidade", min_value=1, value=1, step=1)
+        add_item     = bc3.form_submit_button("➕ Adicionar à lista", use_container_width=True)
+
+    if add_item:
+        if nova_palavra.strip():
+            lista_itens.append({"palavra_chave": nova_palavra.strip(), "quantidade": nova_qtd})
+            st.rerun()
+        else:
+            st.warning("Informe a palavra-chave.")
+
+    if lista_itens:
+        for i, pedido in enumerate(lista_itens):
+            ic1, ic2 = st.columns([6, 1])
+            ic1.markdown(f"**{pedido['palavra_chave']}** — qtd. {pedido['quantidade']:.0f}")
+            if ic2.button("🗑️", key=f"rm_item_busca_{i}"):
+                lista_itens.pop(i)
+                st.rerun()
+    else:
+        st.caption("Nenhum item na lista ainda. Adicione pelo menos um acima.")
+
+    bt1, bt2 = st.columns([3, 1])
+    buscar_todos = bt1.button(
+        "🔎 Buscar todos os itens", type="primary", use_container_width=True, disabled=not lista_itens
+    )
+    if bt2.button("Limpar lista", use_container_width=True, disabled=not lista_itens):
+        st.session_state["busca_lista_itens"] = []
+        st.rerun()
+
+    if not buscar_todos:
+        return
+
+    st.divider()
+    st.subheader("3. Resultado")
+
+    for idx, pedido in enumerate(lista_itens):
+        palavra_chave         = pedido["palavra_chave"]
+        quantidade_necessaria = pedido["quantidade"]
+
+        with st.spinner(f"Buscando '{palavra_chave}'..."):
+            resultado_final, parciais_coletados, tentadas = _executar_busca_cascata(
+                palavra_chave, quantidade_necessaria, por_prioridade
+            )
+
+        if resultado_final:
+            titulo = (
+                f"✅ {palavra_chave} (qtd. {quantidade_necessaria:.0f}) — atendido na "
+                f"{_ROTULOS_PRIORIDADE[resultado_final['prioridade']]}"
+            )
+        elif parciais_coletados:
+            titulo = f"◐ {palavra_chave} (qtd. {quantidade_necessaria:.0f}) — só opções parciais"
+        else:
+            titulo = f"❌ {palavra_chave} (qtd. {quantidade_necessaria:.0f}) — nada encontrado"
+
+        with st.expander(titulo, expanded=(idx == 0)):
+            _renderizar_resultado_busca(palavra_chave, resultado_final, parciais_coletados, tentadas)
+
+    st.caption(
+        "⚠️ A conferência final é sempre a tela do Contratos.gov.br — os saldos mudam a "
+        "qualquer momento (outros órgãos empenham e aderem)."
+    )
+
+
 def _num_si(si_str: str) -> str:
     """Extrai só o número de 'SI 16 – Material de expediente' → '16'."""
     import re
@@ -2934,11 +3620,14 @@ def main():
     pagina = _sidebar(ncs, reqs)
 
     if   pagina == "dashboard":  page_dashboard(ncs, reqs)
+    elif pagina == "gestao":     page_gestao_recursos(ncs)
     elif pagina == "ncs":        page_ncs(ncs, reqs)
     elif pagina == "reqs":       page_reqs(reqs, ncs)
     elif pagina == "pdf":        page_pdf(ncs)
     elif pagina == "gerar_req":  page_gerar_req(reqs, ncs)
     elif pagina == "carona":     page_carona(ncs)
+    elif pagina == "atas":       page_atas()
+    elif pagina == "buscar_item": page_buscar_item()
     elif pagina == "importar":   page_importar(ncs, reqs)
     elif pagina == "relatorios": page_relatorios(ncs, reqs)
     elif pagina == "relatorio_cmt":
