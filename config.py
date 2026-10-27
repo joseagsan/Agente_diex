@@ -61,10 +61,7 @@ SHEET_ID_REQS_SALC   = _s("SHEET_ID_REQS_SALC", "1O-gMC-wYq44gfLoESicRUIQiYH7Hki
 ABA_REQS_SALC        = _s("ABA_REQS_SALC", "SALC")
 
 # --- Documento de Consulta ao Comandante (relatorio_gac) ---
-# Crédito: mesmas abas de ABAS_NC_ORIGEM. Empenhos: abas da planilha
-# Consolidado (SHEET_ID_CONSOLIDADO), somente leitura.
-ABA_RELATORIO_CORRENTE = _s("ABA_RELATORIO_CORRENTE", "Corrente_Consolidado")
-ABA_RELATORIO_RP       = _s("ABA_RELATORIO_RP", "RP_Adaptado")
+# Só a seção SAC, a partir das mesmas abas de crédito de ABAS_NC_ORIGEM.
 # Aba (na planilha do SSAC) onde ficam as justificativas por NC/NE
 ABA_JUSTIFICATIVAS     = _s("ABA_JUSTIFICATIVAS", "JUSTIFICATIVAS_CMT")
 # Aba (na planilha do SSAC) com as fotografias diárias do saldo em tela,

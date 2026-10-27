@@ -378,37 +378,47 @@ def secao_material_permanente(itens) -> tuple[str, str]:
 # Montagem do documento (usada pela linha de comando e pelo app Streamlit)
 # ---------------------------------------------------------------------------
 
+# Seções do documento, na ordem em que aparecem
+SECOES = ("sac", "empenhos", "indicadores", "material")
+
+
 def montar_relatorio(notas_credito, notas_consolidado, notas_rp, itens_material,
                      justificativas: dict[str, str], agora: dt.datetime | None = None,
-                     historico: dict | None = None) -> str:
+                     historico: dict | None = None, secoes: tuple[str, ...] | None = None) -> str:
     """Monta o HTML final a partir dos dados já carregados. Seções sem dados
     ficam de fora; devolve "" se nenhuma seção tiver dados.
 
     `historico` ({data: {NC: em tela}}) liga o comparativo semanal no SAC;
-    None desliga."""
+    None desliga. `secoes` limita as seções incluídas (nomes de SECOES);
+    None inclui todas."""
     agora = agora or dt.datetime.now()
     comparativo = None
     if historico is not None:
         comparativo = core.comparativo_semanal(notas_credito, historico, agora.date())
-    secoes = []
+    geradores = {
+        "sac": lambda: secao_sac(notas_credito, justificativas, comparativo,
+                                 com_comparativo=historico is not None),
+        "empenhos": lambda: secao_empenhos_liquidacao(notas_consolidado, notas_rp, justificativas),
+        "indicadores": lambda: secao_indicadores(notas_credito, notas_consolidado + notas_rp),
+        "material": lambda: secao_material_permanente(itens_material),
+    }
+    blocos = []
     menu = []
-    for html, item in (
-        secao_sac(notas_credito, justificativas, comparativo, com_comparativo=historico is not None),
-        secao_empenhos_liquidacao(notas_consolidado, notas_rp, justificativas),
-        secao_indicadores(notas_credito, notas_consolidado + notas_rp),
-        secao_material_permanente(itens_material),
-    ):
+    for nome in SECOES:
+        if secoes is not None and nome not in secoes:
+            continue
+        html, item = geradores[nome]()
         if html:
-            secoes.append(html)
+            blocos.append(html)
             menu.append(item)
 
-    if not secoes:
+    if not blocos:
         return ""
 
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     return (
         template
-        .replace("{{SECOES}}", "\n".join(secoes))
+        .replace("{{SECOES}}", "\n".join(blocos))
         .replace("{{MENU_ITEMS}}", "\n    ".join(menu))
         .replace("{{DATA_ATUALIZACAO}}", agora.strftime("%d/%m/%Y"))
         .replace("{{DATA_GERACAO}}", agora.strftime("%d/%m/%Y %H:%M"))
@@ -430,6 +440,8 @@ def main():
                     help="CSV com as fotografias do saldo em tela (comparativo semanal)")
     ap.add_argument("--data", default=None,
                     help="Data dos dados (dd/mm/aaaa), se não forem de hoje")
+    ap.add_argument("--secoes", nargs="*", choices=SECOES, default=None,
+                    help="Seções a incluir (padrão: todas as que tiverem dados)")
     args = ap.parse_args()
 
     agora = dt.datetime.now()
@@ -447,7 +459,8 @@ def main():
     historico = carregar_historico(caminho_historico) if notas_credito else None
 
     saida_html = montar_relatorio(notas_credito, notas_consolidado, notas_rp, itens_material,
-                                  justificativas, agora=agora, historico=historico)
+                                  justificativas, agora=agora, historico=historico,
+                                  secoes=tuple(args.secoes) if args.secoes else None)
     if not saida_html:
         print("Nenhuma fonte de dados informada -- nada a gerar. Use --credito/--consolidado/--rp/--material.",
               file=sys.stderr)

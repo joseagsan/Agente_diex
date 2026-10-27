@@ -20,17 +20,16 @@ relatorio_gac/
 
 ## Uso pelo app (SSAC)
 
-No app Streamlit, menu **Ferramentas → 📑 Consulta ao Cmt**. A página lê as
-planilhas direto do Google Sheets — abas de crédito de `ABAS_NC_ORIGEM`
-(`160482`, `167482`) e `Corrente_Consolidado`/`RP_Adaptado` da planilha
-Consolidado —, mostra o relatório (SAC, Empenhos/Liquidação e Indicadores)
-e oferece o download do HTML. As justificativas por NC/NE são editadas na
+No app Streamlit, menu **Ferramentas → 📑 Consulta ao Cmt**. A página gera
+**só a seção SAC** (NCs em tela, com o comparativo semanal), lendo as abas
+de crédito de `ABAS_NC_ORIGEM` (`160482`, `167482`) direto do Google Sheets,
+e oferece o download do HTML. As justificativas por NC são editadas na
 própria página e ficam salvas na aba `JUSTIFICATIVAS_CMT` da planilha do
-SSAC. As abas podem ser trocadas pelas variáveis `ABAS_NC_ORIGEM`,
-`ABA_RELATORIO_CORRENTE`, `ABA_RELATORIO_RP` e `ABA_JUSTIFICATIVAS` (ver
-`config.py`).
+SSAC (variável `ABA_JUSTIFICATIVAS`, ver `config.py`).
 
-A seção de Material Permanente só existe pela linha de comando (`--material`).
+As demais seções (Empenhos/Liquidação, Indicadores e Material Permanente)
+continuam disponíveis pela linha de comando; `--secoes` escolhe quais entram
+(ex.: `--secoes sac`).
 
 ## Comparativo semanal (entrou / saiu de tela)
 
