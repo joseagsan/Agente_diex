@@ -20,17 +20,32 @@ relatorio_gac/
 
 ## Uso pelo app (SSAC)
 
-No app Streamlit, menu **Ferramentas → 📑 Consulta ao Cmt**. A página lê as
-planilhas direto do Google Sheets — abas de crédito de `ABAS_NC_ORIGEM`
-(`160482`, `167482`) e `Corrente_Consolidado`/`RP_Adaptado` da planilha
-Consolidado —, mostra o relatório (SAC, Empenhos/Liquidação e Indicadores)
-e oferece o download do HTML. As justificativas por NC/NE são editadas na
+No app Streamlit, menu **Ferramentas → 📑 Consulta ao Cmt**. A página gera
+**só a seção SAC** (NCs em tela, com o comparativo semanal), lendo as abas
+de crédito de `ABAS_NC_ORIGEM` (`160482`, `167482`) direto do Google Sheets,
+e oferece o download do HTML. As justificativas por NC são editadas na
 própria página e ficam salvas na aba `JUSTIFICATIVAS_CMT` da planilha do
-SSAC. As abas podem ser trocadas pelas variáveis `ABAS_NC_ORIGEM`,
-`ABA_RELATORIO_CORRENTE`, `ABA_RELATORIO_RP` e `ABA_JUSTIFICATIVAS` (ver
-`config.py`).
+SSAC (variável `ABA_JUSTIFICATIVAS`, ver `config.py`).
 
-A seção de Material Permanente só existe pela linha de comando (`--material`).
+As demais seções (Empenhos/Liquidação, Indicadores e Material Permanente)
+continuam disponíveis pela linha de comando; `--secoes` escolhe quais entram
+(ex.: `--secoes sac`).
+
+## Comparativo semanal (entrou / saiu de tela)
+
+A planilha só mostra o saldo de hoje. Por isso, cada geração do relatório
+registra uma "fotografia" do saldo em tela de cada NC do 10º GAC Sl (uma por
+dia) e o SAC compara com a fotografia mais recente que tenha pelo menos 7
+dias — ou, enquanto o histórico for mais curto, com a mais antiga
+disponível. Os cards mostram quanto **entrou** (crédito novo ou saldo que
+aumentou) e quanto **saiu** de tela (empenhado, recolhido ou retirado da
+planilha), e o quadro de comparativo lista as NCs que mudaram.
+
+- No app, as fotografias ficam na aba `HISTORICO_EM_TELA` da planilha do
+  SSAC (variável `ABA_HISTORICO_EM_TELA`), gravada na primeira geração do dia.
+- Pela linha de comando, ficam em `dados/historico_em_tela.csv` (opção
+  `--historico`). Use `--data dd/mm/aaaa` se os CSVs não forem de hoje.
+- O período mínimo (7 dias) é `DIAS_COMPARATIVO` em `core.py`.
 
 ## Uso semanal pela linha de comando
 
@@ -104,8 +119,6 @@ tabelas (`.tabela-scroll`). O script não precisa ser tocado para isso.
 - A geração do **.docx** (Word) ainda é feita à parte (script Node.js com
   o pacote `docx`, gerado nas rodadas anteriores no chat). Posso portar essa
   etapa para dentro deste pacote também, se for útil.
-- Caixas de **comparativo** (o que mudou desde a semana passada) e de
-  **alerta** (pendências específicas) ainda não são geradas automaticamente
-  — hoje dependem de comparar "à mão" com a rodada anterior. Dá para
-  automatizar guardando o HTML/JSON da rodada anterior e comparando os
-  totais, se quiser essa evolução.
+- O **comparativo** cobre o saldo em tela das NCs (seção SAC). Caixas de
+  **alerta** (pendências específicas) e comparativos de NE/RP ainda não são
+  gerados automaticamente.

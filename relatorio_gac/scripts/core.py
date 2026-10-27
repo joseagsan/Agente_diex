@@ -25,6 +25,7 @@ import csv
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -289,6 +290,90 @@ def notas_com_saldo_relevante(notas: list[NotaCredito]) -> list[NotaCredito]:
 
     resultado.sort(key=lambda n: n.nc)
     return resultado
+
+
+# ---------------------------------------------------------------------------
+# Comparativo semanal do saldo em tela
+# ---------------------------------------------------------------------------
+#
+# A planilha só mostra o saldo de hoje. Para saber quanto entrou ou saiu de
+# tela na semana, cada geração do relatório guarda uma "fotografia"
+# ({NC: em tela}) com a data; o comparativo usa a fotografia mais recente
+# que tenha pelo menos DIAS_COMPARATIVO dias (ou, enquanto o histórico for
+# mais curto que isso, a mais antiga disponível).
+
+DIAS_COMPARATIVO = 7
+
+
+def fotografia_em_tela(notas: list[NotaCredito]) -> dict[str, float]:
+    """{NC: saldo em tela} das NCs com saldo (NC ausente = R$ 0,00)."""
+    foto: dict[str, float] = {}
+    for n in notas:
+        if abs(n.em_tela) >= 0.005:
+            foto[n.nc] = round(foto.get(n.nc, 0.0) + n.em_tela, 2)
+    return foto
+
+
+def historico_de_linhas(linhas: list[dict]) -> dict[date, dict[str, float]]:
+    """Converte linhas {DATA (dd/mm/aaaa), NC, EM_TELA} em
+    {data: {NC: em tela}}. Linhas com data inválida são ignoradas."""
+    historico: dict[date, dict[str, float]] = {}
+    for row in limpar_linhas(linhas):
+        try:
+            d = datetime.strptime(row.get("DATA", ""), "%d/%m/%Y").date()
+        except ValueError:
+            continue
+        nc = row.get("NC", "")
+        if nc:
+            historico.setdefault(d, {})[nc] = parse_valor_brl(row.get("EM_TELA"))
+    return historico
+
+
+def linhas_de_fotografia(dia: date, foto: dict[str, float]) -> list[list[str]]:
+    """Inverso de historico_de_linhas() para uma data: [[DATA, NC, EM_TELA]]."""
+    return [[dia.strftime("%d/%m/%Y"), nc, f"{v:.2f}"] for nc, v in sorted(foto.items())]
+
+
+def comparativo_semanal(notas: list[NotaCredito], historico: dict[date, dict[str, float]],
+                        hoje: date) -> Optional[dict]:
+    """Compara o saldo em tela de hoje com a fotografia de referência.
+    Devolve None se não houver nenhuma fotografia anterior a hoje."""
+    anteriores = sorted(d for d in historico if d < hoje)
+    if not anteriores:
+        return None
+    limite = hoje - timedelta(days=DIAS_COMPARATIVO)
+    base = max((d for d in anteriores if d <= limite), default=anteriores[0])
+
+    antes = historico[base]
+    agora = fotografia_em_tela(notas)
+    finalidades = {n.nc: n.finalidade for n in notas}
+
+    entrou, saiu = [], []
+    for nc in sorted(set(antes) | set(agora)):
+        delta = round(agora.get(nc, 0.0) - antes.get(nc, 0.0), 2)
+        if abs(delta) < 0.01:
+            continue
+        item = {
+            "nc": nc,
+            "finalidade": finalidades.get(nc, "(não consta mais na planilha)"),
+            "antes": antes.get(nc, 0.0),
+            "depois": agora.get(nc, 0.0),
+            "delta": delta,
+        }
+        (entrou if delta > 0 else saiu).append(item)
+
+    entrou.sort(key=lambda i: -i["delta"])
+    saiu.sort(key=lambda i: i["delta"])
+    return {
+        "data_base": base,
+        "dias": (hoje - base).days,
+        "entrou": entrou,
+        "saiu": saiu,
+        "total_entrou": sum(i["delta"] for i in entrou),
+        "total_saiu": -sum(i["delta"] for i in saiu),
+        "total_antes": sum(antes.values()),
+        "total_agora": sum(agora.values()),
+    }
 
 
 # ---------------------------------------------------------------------------
