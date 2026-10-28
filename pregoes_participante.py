@@ -17,7 +17,9 @@ Uso fora do app (a primeira varredura pode levar uns 15 min):
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
@@ -251,6 +253,55 @@ def buscar(itens: list[dict], busca: str) -> tuple[set[str], list[dict]]:
     pregoes = {it["ID_COMPRA"] for it in itens if _bate(it.get("OBJETO", ""), termos)}
     batem = [it for it in itens if _bate(f"{it.get('DESCRICAO', '')} {it.get('PDM', '')}", termos)]
     return pregoes, batem
+
+
+# ── Ligação com as requisições (aba SSAC_REQS) ──────────────────────────────
+def _so_digitos(s) -> str:
+    return re.sub(r"\D", "", str(s or ""))
+
+
+def chave_item(pregao: str, cnpj: str, item: str) -> tuple[str, str, int] | None:
+    """Chave para casar um item mapeado com o item de uma REQ. A REQ não
+    guarda a UASG gerenciadora (e o mesmo nº de pregão existe em UASGs
+    diferentes), por isso o CNPJ do fornecedor entra na chave. O pregão
+    vem como "90009/2025" no mapa e "Pregão 90009/2025" na REQ."""
+    m = re.search(r"(\d+)\s*/\s*(\d{4})", str(pregao or ""))
+    num_item = _so_digitos(item)
+    if not m or not num_item:
+        return None
+    return f"{int(m.group(1))}/{m.group(2)}", _so_digitos(cnpj), int(num_item)
+
+
+def _qtd(v) -> float:
+    s = str(v or "").strip()
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def requisitado_por_item(reqs: list[dict]) -> dict[tuple, dict]:
+    """Soma, por chave_item, a quantidade pedida nas REQs não anuladas e
+    lista quais REQs pediram o item."""
+    consumo: dict[tuple, dict] = {}
+    for r in reqs:
+        if r.get("SITUACAO") == "Anulado" or not r.get("ITENS_JSON"):
+            continue
+        try:
+            itens = json.loads(r["ITENS_JSON"])
+        except (ValueError, TypeError):
+            continue
+        for it in itens:
+            k = chave_item(r.get("PREGAO", ""), r.get("CNPJ", ""), it.get("ITEM", ""))
+            if not k:
+                continue
+            c = consumo.setdefault(k, {"qtd": 0.0, "reqs": []})
+            c["qtd"] += _qtd(it.get("QTD"))
+            if r.get("REQ") and r["REQ"] not in c["reqs"]:
+                c["reqs"].append(str(r["REQ"]))
+    return consumo
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 SSAC — Sistema de Suporte ao Controle de NCs e Requisições.
 Execute: streamlit run interface.py
 """
+import json
 import logging
 import re
 from datetime import date, datetime
@@ -1466,6 +1467,8 @@ def page_reqs(reqs_legado, ncs):
         mi2.metric("PI",   r_d.get("PI",   "—"))
         mi3.metric("ND",   r_d.get("ND",   "—"))
         mi4.metric("Tipo", r_d.get("TIPO", "—"))
+
+        _secao_pregao_da_req(r_d)
 
         st.divider()
         ec1, ec2, ec3 = st.columns(3)
@@ -3677,26 +3680,117 @@ def page_nossos_pregoes():
     batem_sel = {(it["ATA"], it["ITEM"]) for it in itens_batem}
     mostrar = [it for it in its_sel if not so_busca or (it["ATA"], it["ITEM"]) in batem_sel]
 
-    df_itens = pd.DataFrame([{
-        "Item":         it["ITEM"],
-        "Descrição":    it["DESCRICAO"],
-        "Qtd. nossa":   it["QTD_NOSSA"],
-        "Valor unit.":  it["VALOR_UNIT"],
-        "Fornecedor":   it["FORNECEDOR"],
-        "CNPJ":         _formatar_cnpj(it["CNPJ"]),
-        "Ata":          it["ATA"],
-        "Vigência até": it["VIGENCIA_FINAL"],
-        "Papel":        it["PAPEL"],
-    } for it in sorted(mostrar, key=lambda x: x["ITEM"])])
-    st.dataframe(df_itens, use_container_width=True, hide_index=True)
+    consumo = _consumo_reqs()
+    mostrar = sorted(mostrar, key=lambda x: x["ITEM"])
+    df_itens = pd.DataFrame([_linha_item_pregao(it, consumo) for it in mostrar])
+
+    st.caption("Selecione um ou mais itens (do mesmo fornecedor) para montar a requisição.")
+    evt_it = st.dataframe(
+        df_itens, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="multi-row", key=f"nossos_itens_{id_sel}_{so_busca}",
+    )
+    sel_it = [mostrar[i] for i in (evt_it.selection.rows if evt_it and hasattr(evt_it, "selection") else [])]
+    if sel_it:
+        cnpjs = {it["CNPJ"] for it in sel_it}
+        if len(cnpjs) > 1:
+            st.warning("A requisição é por fornecedor — selecione itens de um fornecedor só.")
+        elif st.button(f"📃 Levar {len(sel_it)} item(ns) para Gerar REQ", type="primary"):
+            _levar_para_gerar_req(sel_it)
 
     links = sorted({(it["ATA"], it["LINK_PNCP"]) for it in its_sel if it.get("LINK_PNCP")})
     if links:
         st.caption("Atas no PNCP: " + " · ".join(f"[{ata}]({link})" for ata, link in links))
     st.caption(
-        "⚠️ 'Qtd. nossa' é a quantidade registrada para a nossa UASG no pregão — o saldo "
-        "(descontando o que já empenhamos) confira no Contratos.gov.br antes de requisitar."
+        "⚠️ 'Saldo estimado' = quantidade registrada para nós − o que já está nas REQs não "
+        "anuladas deste pregão/fornecedor/item. Confira no Contratos.gov.br antes de requisitar."
     )
+
+
+def _consumo_reqs() -> dict:
+    from pregoes_participante import requisitado_por_item
+    try:
+        return requisitado_por_item(_ler_reqs_cached())
+    except Exception:
+        return {}
+
+
+def _linha_item_pregao(it: dict, consumo: dict) -> dict:
+    from pregoes_participante import _qtd, chave_item
+    c = consumo.get(chave_item(it["PREGAO"], it["CNPJ"], it["ITEM"]), {"qtd": 0.0, "reqs": []})
+    nossa = _qtd(it["QTD_NOSSA"])
+    return {
+        "Item":            it["ITEM"],
+        "Descrição":       it["DESCRICAO"],
+        "Qtd. nossa":      nossa,
+        "Já requisitado":  c["qtd"],
+        "Saldo estimado":  nossa - c["qtd"],
+        "REQs":            ", ".join(c["reqs"]),
+        "Valor unit.":     fmt(_qtd(it["VALOR_UNIT"])),
+        "Fornecedor":      it["FORNECEDOR"],
+        "CNPJ":            _formatar_cnpj(it["CNPJ"]),
+        "Ata":             it["ATA"],
+        "Vigência até":    it["VIGENCIA_FINAL"],
+    }
+
+
+def _levar_para_gerar_req(itens: list[dict]):
+    """Monta os itens e o bloco 'Fornecedor / Pregão' da página Gerar REQ
+    a partir dos itens selecionados em Nossos Pregões e abre a página."""
+    from pregoes_participante import _qtd
+    req_itens = []
+    for i, it in enumerate(itens, start=1):
+        v = _qtd(it["VALOR_UNIT"])
+        req_itens.append({
+            "ORD": str(i), "ITEM": it["ITEM"], "SI": "",
+            "DESCRICAO_ITEM": it["DESCRICAO"], "UND": "UN", "QTD": "1,000",
+            "VALOR_UNIT": fmt(v), "VALOR_TOTAL": fmt(v), "_total": v, "_vunit": v,
+        })
+    p = itens[0]
+    try:
+        vig = datetime.strptime(max(it["VIGENCIA_FINAL"] for it in itens), "%Y-%m-%d").strftime("%d/%m/%Y")
+    except ValueError:
+        vig = ""
+    st.session_state.req_itens     = req_itens
+    st.session_state["_b2_forn"]   = p["FORNECEDOR"]
+    st.session_state["_b2_cnpj"]   = p["CNPJ"]
+    st.session_state["_b2_pregao"] = p["PREGAO"]
+    st.session_state["_b2_ug"]     = p["UASG_GERENCIADORA"]
+    st.session_state["_b2_vig"]    = vig
+    st.session_state["_b2_ver"]    = st.session_state.get("_b2_ver", 0) + 1
+    st.session_state["page"]       = "gerar_req"
+    st.rerun()
+
+
+def _secao_pregao_da_req(r_d: dict):
+    """No detalhe da REQ: situação de cada item no mapa de Nossos Pregões."""
+    from pregoes_participante import _qtd, chave_item
+    try:
+        mapeados, _ = _pregoes_mapeados_cached()
+        itens_req = json.loads(r_d.get("ITENS_JSON") or "[]")
+    except Exception:
+        return
+    por_chave = {chave_item(m["PREGAO"], m["CNPJ"], m["ITEM"]): m for m in mapeados}
+    consumo = _consumo_reqs()
+    linhas = []
+    for it in itens_req:
+        k = chave_item(r_d.get("PREGAO", ""), r_d.get("CNPJ", ""), it.get("ITEM", ""))
+        m = por_chave.get(k)
+        if not m:
+            continue
+        linha = _linha_item_pregao(m, consumo)
+        linhas.append({"Item": linha["Item"], "Descrição": linha["Descrição"],
+                       "Nesta REQ": _qtd(it.get("QTD")), "Qtd. nossa": linha["Qtd. nossa"],
+                       "Requisitado (todas)": linha["Já requisitado"],
+                       "Saldo estimado": linha["Saldo estimado"]})
+    if not linhas:
+        return
+    m0 = por_chave[chave_item(r_d.get("PREGAO", ""), r_d.get("CNPJ", ""), linhas[0]["Item"])]
+    st.markdown(f"**🗂️ Pregão {m0['PREGAO']} — UASG {m0['UASG_GERENCIADORA']} {m0['GERENCIADORA']}**"
+                f" · ata até {m0['VIGENCIA_FINAL']}")
+    df = pd.DataFrame(linhas)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    if (df["Saldo estimado"] < 0).any():
+        st.warning("Algum item já passou da quantidade registrada para nós neste pregão.")
 
 
 def _num_si(si_str: str) -> str:
