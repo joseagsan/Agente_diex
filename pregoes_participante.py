@@ -94,12 +94,19 @@ def _linha_item(it: dict, unidade: dict) -> dict:
     }
 
 
-def _nossa_unidade(it: dict, ug_propria: str) -> dict | None:
-    unidades = consultar_adesao_item(
-        it.get("numeroAtaRegistroPreco", ""),
-        str(it["_ata"].get("codigoUnidadeGerenciadora", "")),
-        it.get("numeroItem", ""),
-    )
+def _nossa_unidade(it: dict, ug_propria: str, tentativas: int = 3) -> dict | None:
+    # a API dá timeout de vez em quando; sem retentar, um item derruba a UASG toda
+    for n in range(tentativas):
+        try:
+            unidades = consultar_adesao_item(
+                it.get("numeroAtaRegistroPreco", ""),
+                str(it["_ata"].get("codigoUnidadeGerenciadora", "")),
+                it.get("numeroItem", ""),
+            )
+            break
+        except Exception:
+            if n == tentativas - 1:
+                raise
     return next((u for u in unidades if str(u.get("codigoUnidade", "")) == str(ug_propria)), None)
 
 
