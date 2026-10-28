@@ -8,6 +8,9 @@ Referência: https://dadosabertos.compras.gov.br/swagger-ui/index.html
 """
 from __future__ import annotations
 import logging
+import random
+import time
+
 import requests
 
 logger = logging.getLogger(__name__)
@@ -17,11 +20,36 @@ TIMEOUT = (5, 20)
 MAX_PAGINAS = 20  # trava de segurança contra loop de paginação
 
 
+TENTATIVAS = 6  # a API devolve 429 (Too Many Requests) quando apertamos demais
+
+
+def _espera(tentativa: int, r: requests.Response | None) -> float:
+    retry_after = r.headers.get("Retry-After", "") if r is not None else ""
+    if retry_after.isdigit():
+        return min(float(retry_after), 120.0)
+    return min(2 ** (tentativa + 1), 60) * random.uniform(0.75, 1.25)
+
+
 def _get(endpoint: str, params: dict) -> dict:
+    """GET com retentativa e espera crescente em 429, erro 5xx e timeout."""
     url = f"{BASE}/{endpoint}"
-    r = requests.get(url, params=params, headers={"Accept": "application/json"}, timeout=TIMEOUT)
-    r.raise_for_status()
-    return r.json()
+    for tentativa in range(TENTATIVAS):
+        r = None
+        try:
+            r = requests.get(url, params=params, headers={"Accept": "application/json"}, timeout=TIMEOUT)
+            if r.status_code != 429 and r.status_code < 500:
+                r.raise_for_status()
+                return r.json()
+        except (requests.Timeout, requests.ConnectionError):
+            pass
+        if tentativa == TENTATIVAS - 1:
+            if r is not None:
+                r.raise_for_status()
+            raise requests.Timeout(f"Sem resposta da API após {TENTATIVAS} tentativas: {url}")
+        espera = _espera(tentativa, r)
+        logger.warning("API %s respondeu %s; nova tentativa em %.0f s.",
+                       endpoint, r.status_code if r is not None else "timeout", espera)
+        time.sleep(espera)
 
 
 def _paginar(endpoint: str, params: dict) -> list[dict]:
