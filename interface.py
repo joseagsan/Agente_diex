@@ -413,6 +413,7 @@ NAV_GRUPOS = [
         ("🤝", "Carona",           "carona"),
         ("📑", "Atas",             "atas"),
         ("🔎", "Buscar Item",      "buscar_item"),
+        ("🗂️", "Nossos Pregões",   "nossos_pregoes"),
     ]),
     ("Dados & Documentos", [
         ("📥", "Importar Dados",   "importar"),
@@ -3556,6 +3557,148 @@ def page_buscar_item():
     )
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _pregoes_mapeados_cached():
+    from pregoes_participante import ler_itens_mapeados, ler_pregoes_verificados
+    return ler_itens_mapeados(), ler_pregoes_verificados()
+
+
+def page_nossos_pregoes():
+    st.title("🗂️ Nossos Pregões")
+    st.caption(
+        f"Pregões (SRP) vigentes em que a UASG {UG_PADRAO} é participante ou gerenciadora, com os "
+        "itens em que temos quantidade registrada — empenho direto, sem carona. Busque pelo "
+        "objeto do pregão (ex: material de expediente) ou pela descrição do item (ex: papel A4)."
+    )
+
+    from pregoes_participante import atualizar_mapeamento, buscar, uasgs_gerenciadoras_cadastradas
+
+    try:
+        itens, verificados = _pregoes_mapeados_cached()
+    except Exception as e:
+        st.error(f"Erro ao carregar o mapeamento: {e}")
+        return
+
+    hoje = date.today().strftime("%Y-%m-%d")
+    itens = [it for it in itens if (it.get("VIGENCIA_FINAL") or "") >= hoje]
+    ultima = max((v.get("VERIFICADO_EM", "") for v in verificados), default="")
+
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Pregões em que participamos", len({it["ID_COMPRA"] for it in itens}))
+    k2.metric("Itens nossos (atas vigentes)", len(itens))
+    k3.metric("Pregões verificados", len(verificados))
+
+    with st.expander("🔄 Atualizar mapeamento", expanded=not verificados):
+        st.caption(
+            "Varre as atas vigentes da nossa UASG e das UASGs cadastradas em **Buscar Item** e "
+            "**Atas**, item a item, procurando a nossa UASG entre as participantes. Por padrão só "
+            "varre pregões ainda não verificados (rápido); a primeira vez pode levar alguns minutos."
+            + (f" Última verificação: {ultima}." if ultima else "")
+        )
+        forcar = st.checkbox("Remapear tudo do zero", value=False)
+        if st.button("🔄 Atualizar agora", type="primary"):
+            status = st.status("Mapeando pregões...", expanded=True)
+            try:
+                ugs = uasgs_gerenciadoras_cadastradas(UG_PADRAO)
+                resumo = atualizar_mapeamento(ugs, UG_PADRAO, forcar=forcar, progresso=status.write)
+            except Exception as e:
+                status.update(label="Erro no mapeamento", state="error")
+                st.error(str(e))
+            else:
+                status.update(
+                    label=(f"Pronto: {resumo['pregoes_verificados']} pregão(ões) verificado(s), "
+                           f"{resumo['pregoes_participante']} com participação nossa, "
+                           f"{resumo['itens']} item(ns)."),
+                    state="error" if resumo["erros"] else "complete",
+                )
+                for erro in resumo["erros"]:
+                    st.warning(erro)
+                _pregoes_mapeados_cached.clear()
+                if st.button("Ver resultado"):
+                    st.rerun()
+
+    if not itens:
+        st.info("Nenhum pregão mapeado ainda. Clique em **Atualizar agora** acima.")
+        return
+
+    st.divider()
+    busca = st.text_input("O que você procura?", placeholder="ex: material de expediente, toner, papel A4")
+
+    pregoes_objeto, itens_batem = buscar(itens, busca) if busca.strip() else (set(), [])
+    ids_itens = {it["ID_COMPRA"] for it in itens_batem}
+    if busca.strip():
+        ids_mostrar = pregoes_objeto | ids_itens
+        if not ids_mostrar:
+            st.info(f"Nada com '{busca}' no objeto dos pregões nem na descrição dos itens. "
+                    "Tente um termo mais curto (ex: 'expediente' em vez de 'material de expediente').")
+            return
+    else:
+        ids_mostrar = {it["ID_COMPRA"] for it in itens}
+
+    por_pregao: dict = {}
+    for it in itens:
+        if it["ID_COMPRA"] in ids_mostrar:
+            por_pregao.setdefault(it["ID_COMPRA"], []).append(it)
+
+    linhas = []
+    for id_compra, its in por_pregao.items():
+        p = its[0]
+        n_batem = sum(1 for it in itens_batem if it["ID_COMPRA"] == id_compra)
+        linhas.append({
+            "ID":            id_compra,
+            "UASG":          p["UASG_GERENCIADORA"],
+            "Gerenciadora":  p["GERENCIADORA"],
+            "Pregão":        p["PREGAO"],
+            "Objeto":        p["OBJETO"],
+            "Itens nossos":  len(its),
+            "Itens na busca": (str(n_batem) if n_batem else "objeto") if busca.strip() else "—",
+            "Vigência até":  max(it["VIGENCIA_FINAL"] for it in its),
+        })
+    df = pd.DataFrame(linhas).sort_values(["Itens nossos"], ascending=False)
+
+    st.caption(f"{len(df)} pregão(ões). Clique num pregão para ver os itens.")
+    evt = st.dataframe(
+        df.drop(columns=["ID"]), use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row", key=f"nossos_pregoes_{busca}",
+    )
+    sel = evt.selection.rows if (evt and hasattr(evt, "selection")) else []
+    if not sel:
+        return
+
+    id_sel = df.iloc[sel[0]]["ID"]
+    its_sel = por_pregao[id_sel]
+    p = its_sel[0]
+    st.subheader(f"Pregão {p['PREGAO']} — UASG {p['UASG_GERENCIADORA']} {p['GERENCIADORA']}")
+    st.caption(p["OBJETO"])
+
+    so_busca = False
+    if busca.strip() and id_sel in ids_itens:
+        so_busca = st.toggle("Mostrar só os itens que batem com a busca", value=True)
+    batem_sel = {(it["ATA"], it["ITEM"]) for it in itens_batem}
+    mostrar = [it for it in its_sel if not so_busca or (it["ATA"], it["ITEM"]) in batem_sel]
+
+    df_itens = pd.DataFrame([{
+        "Item":         it["ITEM"],
+        "Descrição":    it["DESCRICAO"],
+        "Qtd. nossa":   it["QTD_NOSSA"],
+        "Valor unit.":  it["VALOR_UNIT"],
+        "Fornecedor":   it["FORNECEDOR"],
+        "CNPJ":         _formatar_cnpj(it["CNPJ"]),
+        "Ata":          it["ATA"],
+        "Vigência até": it["VIGENCIA_FINAL"],
+        "Papel":        it["PAPEL"],
+    } for it in sorted(mostrar, key=lambda x: x["ITEM"])])
+    st.dataframe(df_itens, use_container_width=True, hide_index=True)
+
+    links = sorted({(it["ATA"], it["LINK_PNCP"]) for it in its_sel if it.get("LINK_PNCP")})
+    if links:
+        st.caption("Atas no PNCP: " + " · ".join(f"[{ata}]({link})" for ata, link in links))
+    st.caption(
+        "⚠️ 'Qtd. nossa' é a quantidade registrada para a nossa UASG no pregão — o saldo "
+        "(descontando o que já empenhamos) confira no Contratos.gov.br antes de requisitar."
+    )
+
+
 def _num_si(si_str: str) -> str:
     """Extrai só o número de 'SI 16 – Material de expediente' → '16'."""
     import re
@@ -3628,6 +3771,7 @@ def main():
     elif pagina == "carona":     page_carona(ncs)
     elif pagina == "atas":       page_atas()
     elif pagina == "buscar_item": page_buscar_item()
+    elif pagina == "nossos_pregoes": page_nossos_pregoes()
     elif pagina == "importar":   page_importar(ncs, reqs)
     elif pagina == "relatorios": page_relatorios(ncs, reqs)
     elif pagina == "relatorio_cmt":

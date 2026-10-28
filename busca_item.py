@@ -80,7 +80,7 @@ def classificar_item(item: dict, unidades: list[dict], codigo_ug_propria: str) -
     ug_gerenciadora = ata.get("codigoUnidadeGerenciadora", "")
 
     linha_propria = next(
-        (u for u in unidades if str(u.get("unidadeParticipante", "")) == str(codigo_ug_propria)), None
+        (u for u in unidades if str(u.get("codigoUnidade", "")) == str(codigo_ug_propria)), None
     )
     aceita_adesao = any(u.get("aceitaAdesao") for u in unidades) if unidades else None
 
@@ -101,13 +101,13 @@ def classificar_item(item: dict, unidades: list[dict], codigo_ug_propria: str) -
             empenhada = _num(linha_propria.get("quantidadeEmpenhada"))
         else:
             # somos a própria gerenciadora: usa os totais do item
-            registrada = _num(item.get("quantidadeRegistrada"))
+            registrada = _num(item.get("quantidadeRegistrada") or item.get("quantidadeHomologadaItem"))
             empenhada = 0.0
         resultado["situacao"] = "PARTICIPANTE"
         resultado["quantidade_utilizavel"] = max(registrada - empenhada, 0)
         resultado["origem_quantidade"] = "Quantidade disponível (participante/gerenciadora)"
     elif aceita_adesao:
-        registrada_gerenciadora = _num(item.get("quantidadeRegistrada"))
+        registrada_gerenciadora = _num(item.get("quantidadeRegistrada") or item.get("quantidadeHomologadaItem"))
         resultado["situacao"] = "CARONA"
         resultado["quantidade_utilizavel"] = int(registrada_gerenciadora * 0.5)
         resultado["origem_quantidade"] = "50% da quantidade registrada da gerenciadora"
