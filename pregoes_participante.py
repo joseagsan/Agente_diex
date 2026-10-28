@@ -39,7 +39,11 @@ COLUNAS_ITENS = [
 ]
 COLUNAS_VERIFICADOS = [
     "ID_COMPRA", "UASG_GERENCIADORA", "PREGAO", "OBJETO", "PARTICIPA", "ITENS_NOSSOS", "VERIFICADO_EM",
+    "GERENCIADORA",
 ]
+# Dados que se repetem em todos os itens de um pregão: a aba de itens pode
+# deixá-los vazios, e a leitura completa a partir da aba de verificados.
+CAMPOS_DO_PREGAO = ["UASG_GERENCIADORA", "GERENCIADORA", "PREGAO", "OBJETO"]
 
 PARALELISMO = 16  # chamadas simultâneas à API (cada uma leva ~4 s)
 ANOS_VIGENCIA = 3  # janela de vigência final considerada "vigente"
@@ -145,6 +149,7 @@ def mapear_uasg(codigo_ug: str, ug_propria: str, ja_verificados: set[str],
             "PARTICIPA":         "SIM" if nossos else "NÃO",
             "ITENS_NOSSOS":      str(len(nossos)),
             "VERIFICADO_EM":     datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "GERENCIADORA":      ata.get("nomeUnidadeGerenciadora", "") or "",
         }
         ao_concluir_pregao(verificado, nossos)
 
@@ -172,7 +177,15 @@ def _ler(titulo: str, colunas: list[str]) -> list[dict]:
 
 
 def ler_itens_mapeados() -> list[dict]:
-    return _ler(ABA_ITENS, COLUNAS_ITENS)
+    itens = _ler(ABA_ITENS, COLUNAS_ITENS)
+    if any(not it.get("PREGAO") for it in itens):
+        por_compra = {v["ID_COMPRA"]: v for v in ler_pregoes_verificados()}
+        for it in itens:
+            v = por_compra.get(it.get("ID_COMPRA"), {})
+            for c in CAMPOS_DO_PREGAO:
+                if not it.get(c):
+                    it[c] = v.get(c, "")
+    return itens
 
 
 def ler_pregoes_verificados() -> list[dict]:
@@ -284,24 +297,44 @@ def _qtd(v) -> float:
 
 def requisitado_por_item(reqs: list[dict]) -> dict[tuple, dict]:
     """Soma, por chave_item, a quantidade pedida nas REQs não anuladas e
-    lista quais REQs pediram o item."""
+    lista quais REQs pediram o item. Aceita as duas abas de REQs: SSAC_REQS
+    (PREGAO/CNPJ/SITUACAO) e REQUISIÇÕES DE EMPENHOS (pregão escrito na
+    DESCRIÇÃO, sem CNPJ, SITUAÇÃO). Pregão/CNPJ gravados no próprio item
+    (gerador de requisições) têm prioridade."""
     consumo: dict[tuple, dict] = {}
     for r in reqs:
-        if r.get("SITUACAO") == "Anulado" or not r.get("ITENS_JSON"):
+        situacao = r.get("SITUACAO") or r.get("SITUAÇÃO") or ""
+        if situacao.strip().lower().startswith("anula") or not r.get("ITENS_JSON"):
             continue
         try:
             itens = json.loads(r["ITENS_JSON"])
         except (ValueError, TypeError):
             continue
+        pregao_req = r.get("PREGAO") or r.get("DESCRIÇÃO") or ""
         for it in itens:
-            k = chave_item(r.get("PREGAO", ""), r.get("CNPJ", ""), it.get("ITEM", ""))
+            k = chave_item(it.get("PREGAO") or pregao_req, it.get("CNPJ") or r.get("CNPJ", ""), it.get("ITEM", ""))
             if not k:
                 continue
             c = consumo.setdefault(k, {"qtd": 0.0, "reqs": []})
             c["qtd"] += _qtd(it.get("QTD"))
-            if r.get("REQ") and r["REQ"] not in c["reqs"]:
+            if r.get("REQ") and str(r["REQ"]) not in c["reqs"]:
                 c["reqs"].append(str(r["REQ"]))
     return consumo
+
+
+def consumo_do_item(consumo: dict, pregao: str, cnpj: str, item: str) -> dict:
+    """Consumo de um item mapeado, somando as REQs que não guardaram CNPJ
+    (casadas só por pregão + item)."""
+    k = chave_item(pregao, cnpj, item)
+    if not k:
+        return {"qtd": 0.0, "reqs": []}
+    total = {"qtd": 0.0, "reqs": []}
+    for kk in {k, (k[0], "", k[2])}:
+        c = consumo.get(kk)
+        if c:
+            total["qtd"] += c["qtd"]
+            total["reqs"] += [r for r in c["reqs"] if r not in total["reqs"]]
+    return total
 
 
 if __name__ == "__main__":

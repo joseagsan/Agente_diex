@@ -3706,17 +3706,28 @@ def page_nossos_pregoes():
     )
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _reqs_gerador_cached():
+    from sheets_nc import ler_reqs
+    return ler_reqs()
+
+
 def _consumo_reqs() -> dict:
+    """Itens já requisitados, das duas abas: SSAC_REQS (app) e REQUISIÇÕES
+    DE EMPENHOS (gerador de requisições)."""
     from pregoes_participante import requisitado_por_item
-    try:
-        return requisitado_por_item(_ler_reqs_cached())
-    except Exception:
-        return {}
+    reqs = []
+    for ler in (_ler_reqs_cached, _reqs_gerador_cached):
+        try:
+            reqs += ler()
+        except Exception:
+            pass
+    return requisitado_por_item(reqs)
 
 
 def _linha_item_pregao(it: dict, consumo: dict) -> dict:
-    from pregoes_participante import _qtd, chave_item
-    c = consumo.get(chave_item(it["PREGAO"], it["CNPJ"], it["ITEM"]), {"qtd": 0.0, "reqs": []})
+    from pregoes_participante import _qtd, consumo_do_item
+    c = consumo_do_item(consumo, it["PREGAO"], it["CNPJ"], it["ITEM"])
     nossa = _qtd(it["QTD_NOSSA"])
     return {
         "Item":            it["ITEM"],
